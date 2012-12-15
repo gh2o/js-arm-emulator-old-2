@@ -1,0 +1,39 @@
+make allnoconfig
+
+general setup
+	set experimental
+	cross compiler prefix
+	system V ipc
+	timers subsystem -> tickless system
+	kernel log buffer size = 16
+	namespaces support -> disable IPC namespace
+	initramfs support
+	optimize for size
+
+system type
+	MMU
+	ARM system type = versatile
+	versatile platform type -> only DT
+	no thumb
+	disable I-cache
+	disable D-cache
+
+kernel features
+	use EABI
+	disable old ABI
+	disable cross memory
+
+boot options
+	disable ATAGS
+	auto calculation of kernel address
+
+power management options
+	disable standby
+
+device drivers
+	generic driver options -> prevent firmware build
+	character devices -> serial drivers -> PL011 + console
+
+file systems
+	pseudo filesystems -> tmpfs
+

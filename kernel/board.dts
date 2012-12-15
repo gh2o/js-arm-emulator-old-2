@@ -1,0 +1,51 @@
+/dts-v1/;
+
+/ {
+	model = "ARM Versatile AB";
+	compatible = "arm,versatile-ab";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&vic>;
+
+	chosen {
+		bootargs = "earlyprintk debug";
+	};
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	memory {
+		device_type = "memory";
+		reg = <0x0 0x08000000>;
+	};
+
+	amba {
+		compatible = "arm,amba-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		vic: intc@10140000 {
+			compatible = "arm,versatile-vic";
+			interrupt-controller;
+			#interrupt-cells = <1>;
+			reg = <0x10140000 0x1000>;
+		};
+
+		sic: intc@10003000 {
+			compatible = "arm,versatile-sic";
+			interrupt-controller;
+			#interrupt-cells = <1>;
+			reg = <0x10003000 0x1000>;
+			interrupt-parent = <&vic>;
+			interrupts = <31>; /* Cascaded to vic */
+		};
+
+		uart0: uart@101f1000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x101f1000 0x1000>;
+			interrupts = <12>;
+		};
+	};
+};
