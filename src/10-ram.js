@@ -8,38 +8,30 @@
 	function numIndex (x) { return x & (BLOCK_SIZE - 1); }
 
 	/** @constructor */
-	function RAM ()
+	function RAM (start, size)
 	{
 		this.blocks = new Array (NUM_BLOCKS);
+		this.start = start;
+		this.size = size;
 	}
 
 	RAM.prototype = {
 		read32: function (offset) {
-			if ((offset & 0x03) == 0)
-			{
-				var block = this.blocks[numBlock(offset)];
-				return block ? block[numIndex(offset) >> 2] : 0;
-			}
-			else
-			{
+			if ((offset & 0x03) != 0)
 				throw 'unaligned RAM read';
-			}
+			var block = this.blocks[numBlock(offset)];
+			return block ? block[numIndex(offset) >> 2] : 0;
 		},
 		write32: function (offset, data) {
-			if ((offset & 0x03) == 0)
-			{
-				var block = this.blocks[numBlock(offset)];
-				if (!block)
-				{
-					block = new Uint32Array (BLOCK_SIZE / 4);
-					this.blocks[numBlock(offset)] = block;
-				}
-				block[numIndex(offset) >> 2] = data;
-			}
-			else
-			{
+			if ((offset & 0x03) != 0)
 				throw 'unaligned RAM write';
+			var block = this.blocks[numBlock(offset)];
+			if (!block)
+			{
+				block = new Uint32Array (BLOCK_SIZE / 4);
+				this.blocks[numBlock(offset)] = block;
 			}
+			block[numIndex(offset) >> 2] = data;
 		}
 	};
 
