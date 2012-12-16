@@ -13,4 +13,7 @@ var fs = require('fs');
 loadBuffer (pmem, 0x01000000, fs.readFileSync('./kernel/image'));
 loadBuffer (pmem, 0x02000000, fs.readFileSync('./kernel/board.dtb'));
 
-var cpu = new CPU.Core ();
+var cpu = new CPU.Core (pmem);
+cpu.pc.set (0x01000000);
+while (true)
+	cpu.tick ();
