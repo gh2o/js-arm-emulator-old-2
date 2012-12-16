@@ -2,156 +2,156 @@
   function b() {
   }
   b.prototype = c.prototype;
-  a.Z = c.prototype;
+  a.F = c.prototype;
   a.prototype = new b
 }
-;var f;
-f = function(a) {
+;var g, j;
+g = function(a) {
   for(a = a.toString(16);8 > a.length;) {
     a = "0" + a
   }
   return a
 };
-function h(a, c) {
-  this.h = Array(65536);
+function k(a, c) {
+  this.e = Array(65536);
   this.start = a;
   this.size = c
 }
-h.prototype = {b:function(a) {
+k.prototype = {b:function(a) {
   if(0 != (a & 3)) {
     throw"unaligned RAM read";
   }
-  var c = this.h[a >>> 16];
+  var c = this.e[a >>> 16];
   return c ? c[(a & 65535) >> 2] : 0
-}, e:function(a, c) {
+}, d:function(a, c) {
   if(0 != (a & 3)) {
     throw"unaligned RAM write";
   }
-  var b = this.h[a >>> 16];
-  b || (b = new Uint32Array(16384), this.h[a >>> 16] = b);
+  var b = this.e[a >>> 16];
+  b || (b = new Uint32Array(16384), this.e[a >>> 16] = b);
   b[(a & 65535) >> 2] = c
 }};
-function k() {
-  this.l = []
+function l() {
+  this.g = []
 }
-k.prototype = {v:function(a) {
-  this.l.push(a)
-}, m:function(a) {
-  for(var c = this.l, b = 0;b < c.length;b++) {
-    var d = c[b], g = d.start, j = d.size;
-    if(a >= g && a < g + j) {
+l.prototype = {m:function(a) {
+  this.g.push(a)
+}, h:function(a) {
+  for(var c = this.g, b = 0;b < c.length;b++) {
+    var d = c[b], f = d.start, h = d.size;
+    if(a >= f && a < f + h) {
       return d
     }
   }
-  throw"undefined access to physical location " + f(a);
+  throw"undefined access to physical location " + g(a);
 }, b:function(a) {
   if(0 != (a & 3)) {
     throw"unaligned physical read";
   }
-  var c = this.m(a);
+  var c = this.h(a);
   return c.b(a - c.start)
-}, e:function(a, c) {
+}, d:function(a, c) {
   if(0 != (a & 3)) {
     throw"unaligned physical write";
   }
-  var b = this.m(a);
-  b.e(a - b.start, c)
+  var b = this.h(a);
+  b.d(a - b.start, c)
 }};
-function l(a, c) {
-  this.w = a;
-  this.F = c
+function m(a, c) {
+  this.n = a;
+  this.t = c
 }
-l.prototype = {b:function(a) {
-  if(this.w.B.C()) {
+m.prototype = {b:function(a) {
+  if(this.n.q.r()) {
     throw"translated mmu read not implemented";
   }
   if(0 != (a & 3)) {
     throw"unaligned mmu read not implemented";
   }
-  return this.F.b(a)
-}, e:function() {
+  return this.t.b(a)
+}, d:function() {
   throw"mmu write not implemented";
 }};
-function m(a, c, b) {
-  this.U = a;
+function n(a, c, b) {
+  this.z = a;
   this.index = c;
   this.set(b || 0)
 }
-function n(a, c, b) {
-  m.call(this, a, c, b)
-}
 function p(a, c, b) {
-  m.call(this, a, c, b)
+  n.call(this, a, c, b)
 }
-function q() {
-  m.call(this, "cp", -1, 0)
+function q(a, c, b) {
+  n.call(this, a, c, b)
 }
-function r(a) {
-  for(var c = this.X = Array(32), b = Array(18), d = s.q;d < s.c;d++) {
-    b[d] = new m("all", d)
-  }
-  b[s.c] = new n("all", s.c);
-  b[s.f] = new p("all", s.f, 467);
-  b[s.g] = null;
-  for(var g in t) {
-    t.hasOwnProperty(g) && (c[t[g]] = b.slice(0))
-  }
-  var d = {svc:t.t, abt:t.n, und:t.u, irq:t.o, fiq:t.i}, j;
-  for(j in d) {
-    d.hasOwnProperty(j) && (g = c[d[j]], g[s.j] = new m(j, s.j), g[s.k] = new m(j, s.k), g[s.g] = new p(j, s.g))
-  }
-  for(d = s.s;d <= s.r;d++) {
-    c[t.i][d] = new m("fiq", d)
-  }
-  this.W = b[s.p];
-  this.d = b[s.c];
-  this.V = b[s.f];
-  this.B = new q;
-  this.D = new l(this, a)
+function r() {
+  n.call(this, "cp", -1, 0)
 }
-var t = {T:16, i:17, o:18, t:19, n:23, u:27, S:31}, s = {q:0, H:1, L:2, M:3, N:4, O:5, P:6, Q:7, s:8, R:9, I:10, J:11, r:12, j:13, k:14, K:15, p:14, c:15, f:16, g:17};
-m.z = function() {
+var s = {w:16, f:17, j:18, k:19, i:23, l:27, v:31};
+n.o = function() {
   return function() {
     return!!(this.a & 1)
   }
 };
-m.A = function() {
+n.p = function() {
   return function(a) {
     this.a = a ? this.a | 1 : this.a & -2
   }
 };
-m.prototype = {set:function(a) {
+n.prototype = {set:function(a) {
   this.a = a >>> 0
 }};
-e(n, m);
-e(p, m);
-e(q, m);
-var u = q.prototype, v = {C:m.z(), Y:m.A()}, w;
-for(w in v) {
-  u[w] = v[w]
+e(p, n);
+e(q, n);
+e(r, n);
+var t = r.prototype, u = {r:n.o(), D:n.p()}, v;
+for(v in u) {
+  t[v] = u[v]
 }
-r.prototype = {G:function() {
-  var a = this.D.b(this.d.a);
-  this.d.a += 4;
-  console.log(f(a));
+j = function(a) {
+  for(var c = this.C = Array(32), b = Array(18), d = 0;15 > d;d++) {
+    b[d] = new n("all", d)
+  }
+  b[15] = new p("all", 15);
+  b[16] = new q("all", 16, 467);
+  b[17] = null;
+  for(var f in s) {
+    s.hasOwnProperty(f) && (c[s[f]] = b.slice(0))
+  }
+  var d = {svc:s.k, abt:s.i, und:s.l, irq:s.j, fiq:s.f}, h;
+  for(h in d) {
+    d.hasOwnProperty(h) && (f = c[d[h]], f[13] = new n(h, 13), f[14] = new n(h, 14), f[17] = new q(h, 17))
+  }
+  for(d = 8;12 >= d;d++) {
+    c[s.f][d] = new n("fiq", d)
+  }
+  this.B = b[14];
+  this.c = b[15];
+  this.A = b[16];
+  this.q = new r;
+  this.s = new m(this, a)
+};
+function w(a) {
+  j.call(this, a)
+}
+e(w, j);
+w.prototype.u = function() {
+  var a = this.s.b(this.c.a);
+  this.c.a += 4;
+  console.log(g(a));
   throw"haha";
-}};
-function x(a) {
-  r.call(this, a)
-}
-e(x, r);
-function y(a, c, b) {
+};
+function x(a, c, b) {
   for(var d = 0;d < b.length;d += 4) {
-    a.e(c + d, b.readUInt32LE(d, !0))
+    a.d(c + d, b.readUInt32LE(d, !0))
   }
 }
-var z = new k;
-z.v(new h(0, 134217728));
-var A = require("fs");
-y(z, 16777216, A.readFileSync("./kernel/image"));
-y(z, 33554432, A.readFileSync("./kernel/board.dtb"));
-var B = new x(z);
-for(B.d.set(16777216);;) {
-  B.G()
+var y = new l;
+y.m(new k(0, 134217728));
+var z = require("fs");
+x(y, 16777216, z.readFileSync("./kernel/image"));
+x(y, 33554432, z.readFileSync("./kernel/board.dtb"));
+var A = new w(y);
+for(A.c.set(16777216);;) {
+  A.u()
 }
 ;})()
