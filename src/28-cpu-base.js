@@ -77,6 +77,16 @@
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
+	goog.mixin (StatusRegister.prototype, {
+		getN: Register.createGetter (31),
+		setN: Register.createSetter (31),
+		getZ: Register.createGetter (30),
+		setZ: Register.createSetter (30),
+		getC: Register.createGetter (29),
+		setC: Register.createSetter (29),
+		getV: Register.createGetter (28),
+		setV: Register.createSetter (28)
+	});
 
 	/**
 	 * @constructor
