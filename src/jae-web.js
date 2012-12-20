@@ -36,9 +36,9 @@ function start ()
 
 	function load (mem, addr, buf)
 	{
-		var view = new Uint32Array (buf);
+		var view = new DataView (buf);
 		for (var off = 0; off < buf.byteLength; off += 4)
-			mem.write32 (addr + off, view[off / 4]);
+			mem.write32 (addr + off, view.getUint32 (off, true));
 	}
 
 	pmem = new Mem.PhysicalMemory ();
