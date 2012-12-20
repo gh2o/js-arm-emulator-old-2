@@ -32,18 +32,9 @@
 		}
 	}
 
-	/**
-	 * @constructor
-	 */
-	function Core (pmem)
-	{
-		goog.base (this, pmem);
-	}
+	var Core = CPU.Core;
 
-	goog.inherits (Core, CPU.CoreBase);
-	var cp = Core.prototype;
-
-	cp.tick = function () {
+	Core.prototype.tick = function () {
 		var inst = this.mmu.read32 (this.pc._value);
 		this.pc._value += 4;
 
@@ -78,7 +69,5 @@
 
 		func.call (this, inst);
 	};
-
-	CPU.Core = Core;
 
 })();

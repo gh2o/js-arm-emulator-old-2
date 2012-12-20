@@ -77,6 +77,7 @@
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
+	/*
 	goog.mixin (StatusRegister.prototype, {
 		getN: Register.createGetter (31),
 		setN: Register.createSetter (31),
@@ -87,6 +88,7 @@
 		getV: Register.createGetter (28),
 		setV: Register.createSetter (28)
 	});
+	*/
 
 	/**
 	 * @constructor
@@ -101,7 +103,7 @@
 	/**
 	 * @constructor
 	 */
-	function CoreBase (pmem)
+	function Core (pmem)
 	{
 		var rb = this.regbanks = new Array (32);
 
@@ -159,6 +161,6 @@
 		this.mmu = new CPU.MMU (this, pmem);
 	}
 
-	CPU.CoreBase = CoreBase;
+	CPU.Core = Core;
 
 })();
