@@ -1903,7 +1903,6 @@ resourcesList.forEach (loadResource);
 function loadResource (rsrc)
 {
 	var xhr = new XMLHttpRequest ();
-	xhr.responseType = 'arraybuffer';
 	xhr.onreadystatechange = function (evt) {
 		if (xhr.readyState == 4)
 		{
@@ -1919,6 +1918,7 @@ function loadResource (rsrc)
 		}
 	};
 	xhr.open ('GET', 'resources/' + rsrc);
+	xhr.responseType = 'arraybuffer';
 	xhr.send ();
 }
 
