@@ -20,7 +20,7 @@ function loadResource (rsrc)
 			}
 		}
 	};
-	xhr.open ('GET', rsrc);
+	xhr.open ('GET', 'resources/' + rsrc);
 	xhr.send ();
 }
 
