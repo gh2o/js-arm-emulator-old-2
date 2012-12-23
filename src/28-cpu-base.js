@@ -13,6 +13,8 @@
 		SYS: 0x1f
 	};
 
+	CPU.Mode = Mode;
+
 	/**
 	 * @enum {number}
 	 */
@@ -25,7 +27,46 @@
 		CPSR: 16, SPSR: 17
 	};
 
+	CPU.Reg = Reg;
+
+	/**
+	 * @enum {number}
+	 */
+	var Status = {
+		N: 1 << 31,
+		Z: 1 << 30,
+		C: 1 << 29,
+		V: 1 << 28,
+		ALL: 0x0F << 28
+	};
+
+	CPU.Status = Status;
+
+	/**
+	 * @enum {number}
+	 */
+	var Control = {
+		M: 1 << 0,
+		A: 1 << 1,
+		P: 1 << 4,
+		D: 1 << 5,
+		L: 1 << 6,
+		S: 1 << 8,
+		V: 1 << 13
+	};
+
+	(function () {
+		var all = 0;
+		for (var x in Control)
+			if (Control.hasOwnProperty (x))
+				all |= Control[x];
+		Control.ALL = all;
+	})();
+
+	CPU.Control = Control;
+
 	// register utility functions
+	/*
 	Register.createGetter = function (bit) {
 		return function () {
 			return !!(this._value & (1 << bit));
@@ -40,6 +81,7 @@
 				this._value &= ~shifted;
 		};
 	};
+	*/
 
 	/**
 	 * @constructor
@@ -54,10 +96,8 @@
 		this.set (value || 0);
 	}
 	
-	Register.prototype = {
-		get: function () { return this._value; },
-		set: function (value) { this._value = value >>> 0; }
-	};
+	Register.prototype.get = function () { return this._value; };
+	Register.prototype.set = function (value) { this._value = value >>> 0; };
 
 	/**
 	 * @constructor
@@ -77,28 +117,19 @@
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
-	/*
-	goog.mixin (StatusRegister.prototype, {
-		getN: Register.createGetter (31),
-		setN: Register.createSetter (31),
-		getZ: Register.createGetter (30),
-		setZ: Register.createSetter (30),
-		getC: Register.createGetter (29),
-		setC: Register.createSetter (29),
-		getV: Register.createGetter (28),
-		setV: Register.createSetter (28)
-	});
-	*/
+	StatusRegister.prototype.getMode = function () { return this._value & 0x1F; };
 
 	/**
 	 * @constructor
 	 */
 	function ControlRegister () { goog.base (this, "cp", -1, 0); }
 	goog.inherits (ControlRegister, Register);
+	/*
 	goog.mixin (ControlRegister.prototype, {
 		getM: Register.createGetter (0),
 		setM: Register.createSetter (0)
 	});
+	*/
 	
 	/**
 	 * @constructor
@@ -112,7 +143,7 @@
 		for (var i = Reg.R0; i < Reg.PC; i++)
 			genbank[i] = new Register ("all", i);
 		genbank[Reg.PC] = new ProgramCounter ("all", Reg.PC);
-		genbank[Reg.CPSR] = new StatusRegister ("all", Reg.CPSR, 0x01d3);
+		genbank[Reg.CPSR] = new StatusRegister ("all", Reg.CPSR, 0xd3);
 		genbank[Reg.SPSR] = null;
 
 		for (var key in Mode)
@@ -159,7 +190,24 @@
 
 		// memory management
 		this.mmu = new CPU.MMU (this, pmem);
+
+		// instruction execution
+		this.info = {
+			Rn: null,
+			Rd: null,
+			Rs: null,
+			Rm: null
+		};
 	}
+
+	Core.prototype = {
+		getRegBank: function () {
+			return this.regbanks[this.cpsr.getMode()];
+		},
+		getReg: function (n) {
+			return this.getRegBank()[n];
+		}
+	};
 
 	CPU.Core = Core;
 

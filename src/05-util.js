@@ -10,4 +10,11 @@
 
 	Util.hex32 = hex32;
 
+	function rotRight (val, sht)
+	{
+		return ((val >>> sht) | (val << (32 - sht))) >>> 0;
+	}
+
+	Util.rotRight = rotRight;
+
 })();

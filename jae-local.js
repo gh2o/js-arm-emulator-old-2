@@ -1548,6 +1548,13 @@ var CPU = {};
 
 	Util.hex32 = hex32;
 
+	function rotRight (val, sht)
+	{
+		return ((val >>> sht) | (val << (32 - sht))) >>> 0;
+	}
+
+	Util.rotRight = rotRight;
+
 })();
 (function () {
 
@@ -1644,14 +1651,18 @@ var CPU = {};
 
 	MMU.prototype = {
 		read32: function (address) {
-			if (this.cpu.creg.getM ())
+			if (this.cpu.creg._value & CPU.Control.M)
 				throw "translated mmu read not implemented";
 			if ((address & 0x03) != 0)
 				throw "unaligned mmu read not implemented";
 			return this.pmem.read32 (address);
 		},
 		write32: function (address, data) {
-			throw "mmu write not implemented";
+			if (this.cpu.creg._value & CPU.Control.M)
+				throw "translated mmu write not implemented";
+			if ((address & 0x03) != 0)
+				throw "unaligned mmu write not implemented";
+			this.pmem.write32 (address, data);
 		}
 	};
 
@@ -1672,6 +1683,8 @@ var CPU = {};
 		SYS: 0x1f
 	};
 
+	CPU.Mode = Mode;
+
 	/**
 	 * @enum {number}
 	 */
@@ -1684,7 +1697,46 @@ var CPU = {};
 		CPSR: 16, SPSR: 17
 	};
 
+	CPU.Reg = Reg;
+
+	/**
+	 * @enum {number}
+	 */
+	var Status = {
+		N: 1 << 31,
+		Z: 1 << 30,
+		C: 1 << 29,
+		V: 1 << 28,
+		ALL: 0x0F << 28
+	};
+
+	CPU.Status = Status;
+
+	/**
+	 * @enum {number}
+	 */
+	var Control = {
+		M: 1 << 0,
+		A: 1 << 1,
+		P: 1 << 4,
+		D: 1 << 5,
+		L: 1 << 6,
+		S: 1 << 8,
+		V: 1 << 13
+	};
+
+	(function () {
+		var all = 0;
+		for (var x in Control)
+			if (Control.hasOwnProperty (x))
+				all |= Control[x];
+		Control.ALL = all;
+	})();
+
+	CPU.Control = Control;
+
 	// register utility functions
+	/*
 	Register.createGetter = function (bit) {
 		return function () {
 			return !!(this._value & (1 << bit));
@@ -1699,6 +1751,7 @@ var CPU = {};
 				this._value &= ~shifted;
 		};
 	};
+	*/
 
 	/**
 	 * @constructor
@@ -1713,10 +1766,8 @@ var CPU = {};
 		this.set (value || 0);
 	}
 	
-	Register.prototype = {
-		get: function () { return this._value; },
-		set: function (value) { this._value = value >>> 0; }
-	};
+	Register.prototype.get = function () { return this._value; };
+	Register.prototype.set = function (value) { this._value = value >>> 0; };
 
 	/**
 	 * @constructor
@@ -1736,28 +1787,19 @@ var CPU = {};
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
-	/*
-	goog.mixin (StatusRegister.prototype, {
-		getN: Register.createGetter (31),
-		setN: Register.createSetter (31),
-		getZ: Register.createGetter (30),
-		setZ: Register.createSetter (30),
-		getC: Register.createGetter (29),
-		setC: Register.createSetter (29),
-		getV: Register.createGetter (28),
-		setV: Register.createSetter (28)
-	});
-	*/
+	StatusRegister.prototype.getMode = function () { return this._value & 0x1F; };
 
 	/**
 	 * @constructor
 	 */
 	function ControlRegister () { goog.base (this, "cp", -1, 0); }
 	goog.inherits (ControlRegister, Register);
+	/*
 	goog.mixin (ControlRegister.prototype, {
 		getM: Register.createGetter (0),
 		setM: Register.createSetter (0)
 	});
+	*/
 	
 	/**
 	 * @constructor
@@ -1771,7 +1813,7 @@ var CPU = {};
 		for (var i = Reg.R0; i < Reg.PC; i++)
 			genbank[i] = new Register ("all", i);
 		genbank[Reg.PC] = new ProgramCounter ("all", Reg.PC);
-		genbank[Reg.CPSR] = new StatusRegister ("all", Reg.CPSR, 0x01d3);
+		genbank[Reg.CPSR] = new StatusRegister ("all", Reg.CPSR, 0xd3);
 		genbank[Reg.SPSR] = null;
 
 		for (var key in Mode)
@@ -1818,23 +1860,795 @@ var CPU = {};
 
 		// memory management
 		this.mmu = new CPU.MMU (this, pmem);
+
+		// instruction execution
+		this.info = {
+			Rn: null,
+			Rd: null,
+			Rs: null,
+			Rm: null
+		};
 	}
+
+	Core.prototype = {
+		getRegBank: function () {
+			return this.regbanks[this.cpsr.getMode()];
+		},
+		getReg: function (n) {
+			return this.getRegBank()[n];
+		}
+	};
 
 	CPU.Core = Core;
 
 })();
 (function () {
 
-	var uncondTable = [];
-	var condTable = [];
+	var Core = CPU.Core;
+
+	var instructionTable = Core.instructionTable = [];
+
+	Core.registerInstruction = function (func, ident1, ident2, uncond) {
+
+		if (typeof ident1 === 'object')
+		{
+			if (ident1.first && ident1.last)
+			{
+				for (var i = ident1.first; i <= ident1.last; i++)
+					Core.registerInstruction (func, i, ident2, uncond);
+			}
+			else
+			{
+				for (var i = 0; i < ident1.length; i++)
+					Core.registerInstruction (func, ident1[i], ident2, uncond);
+			}
+			return;
+		}
+
+		if (typeof ident2 === 'object')
+		{
+			if (ident2.first && ident2.last)
+			{
+				for (var i = ident2.first; i <= ident2.last; i++)
+					Core.registerInstruction (func, ident1, i, uncond);
+			}
+			else
+			{
+				for (var i = 0; i < ident2.length; i++)
+					Core.registerInstruction (func, ident1, ident2[i], uncond);
+			}
+			return;
+		}
+
+		if (ident2 < 0)
+		{
+			for (var i = 0; i < 16; i++)
+				Core.registerInstruction (func, ident1, i, uncond);
+			return;
+		}
+
+		uncond = Boolean (uncond);
+		var ident = (uncond << 12) | (ident1 << 4) | (ident2);
+
+		if (instructionTable[ident] && instructionTable[ident] !== func)
+			throw "reregistration of instruction!";
+		instructionTable[ident] = func;
+	};
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	Core.registerInstruction (inst_B, {first: 0xa0, last: 0xaf}, -1, false);
+	function inst_B (inst, info)
+	{
+		var offset = (inst << 8) >> 6;
+		this.pc.set (this.pc.get () + offset);
+	}
+
+	Core.registerInstruction (inst_BL, {first: 0xb0, last: 0xbf}, -1, false);
+	function inst_BL (inst, info)
+	{
+		var offset = (inst << 8) >> 6;
+		this.getReg (CPU.Reg.LR).set (this.pc._value);
+		this.pc.set (this.pc.get () + offset);
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	var coprocessors = [];
+
+	coprocessors[15] = {
+		read: function (cpu, n, m, o1, o2) {
+			if (n == 0)
+			{
+				if (o2 == 0)
+				{
+					return 0x41069260;
+				}
+			}
+			else if (n == 1)
+			{
+				if (o2 == 0)
+				{
+					return cpu.creg._value;
+				}
+			}
+			throw "bad CP15 read";
+		},
+		write: function (cpu, n, m, o1, o2, data) {
+			if (n == 1)
+			{
+				if (o2 == 0)
+				{
+					if (data & ~CPU.Control.ALL)
+					{
+						throw "attempted to set undefined control bits: " +
+							Util.hex32 (data & ~CPU.Control.ALL);
+					}
+					cpu.creg._value = data;
+					return;
+				}
+			}
+			else if (n == 2)
+			{
+				cpu.mmu.regTable = data;
+				return;
+			}
+			else if (n == 3)
+			{
+				cpu.mmu.regDomain = data;
+				return;
+			}
+			else if (n == 7)
+			{
+				if (m == 7 && o2 == 0)
+				{
+					// FIXME: invalidate all caches
+					return;
+				}
+				else if (m == 10 && o2 == 4)
+				{
+					// FIXME: data sync barrier
+					return;
+				}
+			}
+			else if (n == 8)
+			{
+				if (m == 7 && o2 == 0)
+				{
+					// FIXME: invalidate all TLBs
+					return;
+				}
+			}
+			throw "bad CP15 write: n=" + n + ", m=" + m +
+				", o1=" + o1 + ", o2=" + o2;
+		}
+	};
+
+	Core.registerInstruction (inst_MRC,
+		[0xE1, 0xE3, 0xE5, 0xE7, 0xE9, 0xEB, 0xED, 0xEF],
+		[1, 3, 5, 7, 9, 11, 13, 15],
+		false
+	);
+	function inst_MRC (inst, info)
+	{
+		var cp_num = (inst >>> 8) & 0x0F;
+		var opcode_1 = (inst >>> 21) & 0x07;
+		var CRn = info.Rn.index;
+		var CRm = info.Rm.index;
+		var opcode_2 = (inst >>> 5) & 0x07;
+
+		var coprocessor = coprocessors[cp_num];
+		if (!coprocessor)
+			throw "bad coprocessor number";
+
+		info.Rd.set (coprocessor.read (this, CRn, CRm, opcode_1, opcode_2));
+	}
+
+	Core.registerInstruction (inst_MCR,
+		[0xE0, 0xE2, 0xE4, 0xE6, 0xE8, 0xEA, 0xEC, 0xEE],
+		[1, 3, 5, 7, 9, 11, 13, 15],
+		false
+	);
+	function inst_MCR (inst, info)
+	{
+		var cp_num = (inst >>> 8) & 0x0F;
+		var opcode_1 = (inst >>> 21) & 0x07;
+		var CRn = info.Rn.index;
+		var CRm = info.Rm.index;
+		var opcode_2 = (inst >>> 5) & 0x07;
+
+		var coprocessor = coprocessors[cp_num];
+		if (!coprocessor)
+			throw "bad coprocessor number";
+
+		coprocessor.write (this, CRn, CRm, opcode_1, opcode_2, info.Rd.get ());
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	function registerData (func, base)
+	{
+		// immediate
+		Core.registerInstruction (func, [base | 0x20, base | 0x21], -1, false);
+		// register
+		var ident2 = [0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7];
+		Core.registerInstruction (func, [base, base | 0x01], ident2, false);
+	}
+
+	function doData (cpu, inst, info, write, func, flagsfunc)
+	{
+		/** @const */ var I = 1 << 25;
+		/** @const */ var S = 1 << 20;
+		/** @const */ var SHIFT_BY_REGISTER = 1 << 4;
+
+		var cflag = !!(cpu.cpsr._value & CPU.Status.C);
+
+		// first decode shifter operand
+		var shifter_operand = 0;
+		var shifter_carry_out = false;
+
+		if (inst & I)
+		{
+			// immediate
+			var rotate_imm = (inst >>> 8) & 0x0F;
+			var immed_8 = inst & 0xFF;
+			shifter_operand = Util.rotRight (immed_8, rotate_imm * 2);
+			if (rotate_imm != 0)
+				shifter_carry_out = shifter_operand & (1 << 31);
+		}
+		else
+		{
+			// register
+			var shift = (inst >>> 5) & 0x03;
+			var sval;
+			if (inst & SHIFT_BY_REGISTER)
+			{
+				sval = info.Rs.get () & 0xFF;
+			}
+			else
+			{
+				var shift_imm = (inst >>> 7) & 0x1F;
+				if (shift_imm != 0)
+					sval = shift_imm;
+				else
+					sval = [0, 32, 32, -1][shift];
+			}
+
+			var rm = info.Rm.get ();
+			switch (shift)
+			{
+				case 0:
+					if (sval == 0)
+					{
+						shifter_operand = rm;
+						shifter_carry_out = cflag;
+					}
+					else if (sval < 32)
+					{
+						shifter_operand = rm << sval;
+						shifter_carry_out = rm & (1 << (32 - sval));
+					}
+					else if (s == 32)
+					{
+						shifter_operand = 0;
+						shifter_carry_out = rm & (1 << 0);
+					}
+					break;
+				case 1:
+					if (sval == 0)
+					{
+						shifter_operand = rm;
+						shifter_carry_out = cflag;
+					}
+					else if (sval < 32)
+					{
+						shifter_operand = rm >>> sval;
+						shifter_carry_out = rm & (1 << (sval - 1));
+					}
+					else if (sval == 32)
+					{
+						shifter_operand = 0;
+						shifter_carry_out = rm & (1 << 31);
+					}
+					break;
+				case 2:
+					if (sval == 0)
+					{
+						shifter_operand = rm;
+						shifter_carry_out = cflag;
+					}
+					else if (sval < 32)
+					{
+						shifter_operand = rm >> sval;
+						shifter_carry_out = rm & (1 << (sval - 1));
+					}
+					else
+					{
+						shifter_carry_out = rm & (1 << 31);
+						shifter_operand = shifter_carry_out ? -1 : 0;
+					}
+					break;
+				case 3:
+					var ssub = sval & 0x1F;
+					if (sval == -1)
+					{
+						shifter_operand = (cflag << 31) | (rm >>> 1);
+						shifter_carry_out = rm & (1 << 0);
+					}
+					else if (sval == 0)
+					{
+						shifter_operand = rm;
+						shifter_carry_out = cflag;
+					}
+					else if (ssub == 0)
+					{
+						shifter_operand = rm;
+						shifter_carry_out = rm & (1 << 31);
+					}
+					else
+					{
+						shifter_operand = Util.rotRight (rm, ssub);
+						shifter_carry_out = rm & (1 << (ssub - 1));
+					}
+					break;
+			}
+		}
+
+		shifter_operand >>>= 0;
+		shifter_carry_out = !!shifter_carry_out;
+
+		// do the actual operation
+		var a = info.Rn.get () >>> 0;
+		var b = shifter_operand >>> 0;
+		var r = func (a, b) >>> 0;
+
+		if (write)
+			info.Rd.set (r);
+
+		if (write && (inst & S) && (info.Rd.index == 15))
+		{
+			var spsr = cpu.getReg (CPU.Reg.SPSR);
+			if (cpu.getReg (CPU.Reg.SPSR))
+				cpu.cpsr._value = spsr._value;
+			else
+				throw "attempted to set CPSR to SPSR when no SPSR exists";
+		}
+		else if (inst & S)
+		{
+			var orig = cpu.cpsr._value >>> 0;
+			cpu.cpsr._value = (
+				(orig & ~CPU.Status.ALL) |
+				flagsfunc (a, b, r, shifter_carry_out, orig)
+			) >>> 0;
+		}
+	}
+
+	function commonFlagsFunc (a, b, r, sco, orig)
+	{
+		return (
+			(r & (1 << 31) ? CPU.Status.N : 0) |
+			(r == 0 ? CPU.Status.Z : 0) |
+			(sco ? CPU.Status.C : 0) |
+			(orig & CPU.Status.V)
+		);
+	}
+
+	function subFlagsFunc (a, b, r, sco, orig)
+	{
+		var a31 = !!(a & (1 << 31));
+		var b31 = !!(b & (1 << 31));
+		var r31 = !!(r & (1 << 31));
+		return (
+			(r & (1 << 31) ? CPU.Status.N : 0) |
+			(r == 0 ? CPU.Status.Z : 0) |
+			((a31 || !b31) && (!b31 || !r31) && (!r31 || a31) ? CPU.Status.C : 0) |
+			((a31 != b31) && (a31 != r31) ? CPU.Status.V : 0)
+		);
+	}
+
+	registerData (inst_AND, 0x00);
+	function inst_AND (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a & b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_SUB, 0x04);
+	function inst_SUB (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a - b; }
+		);
+	}
+
+	registerData (inst_ADD, 0x08);
+	function inst_ADD (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a + b; }
+		);
+	}
+
+	registerData (inst_TST, 0x11);
+	function inst_TST (inst, info)
+	{
+		doData (
+			this, inst, info, false,
+			function (a, b) { return a & b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_TEQ, 0x13);
+	function inst_TEQ (inst, info)
+	{
+		doData (
+			this, inst, info, false,
+			function (a, b) { return a ^ b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_CMP, 0x15);
+	function inst_CMP (inst, info)
+	{
+		doData (
+			this, inst, info, false,
+			function (a, b) { return a - b; },
+			subFlagsFunc
+		);
+	}
+
+	registerData (inst_ORR, 0x18);
+	function inst_ORR (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a | b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_MOV, 0x1a);
+	function inst_MOV (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_BIC, 0x1c);
+	function inst_BIC (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a & ~b; },
+			commonFlagsFunc
+		);
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	function doMultiple (cpu, inst, info, func)
+	{
+		/** @const */ var W = 1 << 21;
+
+		var nr = inst & 0xFFFF;
+		nr = nr - ((nr >>> 1) & 0x5555);
+		nr = ((nr >>> 2) & 0x3333) + (nr & 0x3333);
+		nr = ((nr >>> 4) + nr) & 0x0F0F;
+		nr = ((nr >>> 8) + nr) & 0x00FF;
+		var nr4 = nr << 2;
+
+		var start_address, end_address;
+
+		var Rn = info.Rn;
+		var n = Rn.get ();
+		var pu = (inst >>> 23) & 0x03;
+		switch (pu)
+		{
+			case 0:
+				start_address = n - nr4 + 4;
+				end_address = n;
+				break;
+			case 1:
+				start_address = n;
+				end_address = n + nr4 - 4;
+				break;
+			case 2:
+				start_address = n - nr4;
+				end_address = n - 4;
+				break;
+			case 3:
+				start_address = n + 4;
+				end_address = n + nr4;
+				break;
+		}
+
+		start_address >>>= 0;
+		end_address >>>= 0;
+
+		if (inst & W)
+		{
+			if (pu & 0x01)
+				Rn.set (n + nr4);
+			else
+				Rn.set (n - nr4);
+		}
+
+		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
+	}
+
+	Core.registerInstruction (inst_LDM_1, [0x81, 0x83, 0x89, 0x8B, 0x91, 0x93, 0x99, 0x9B],
+		-1, false);
+	function inst_LDM_1 (inst, info)
+	{
+		doMultiple (
+			this, inst, info,
+			function (start_address, end_address, register_list, bank, mmu)
+			{
+				var address = start_address;
+				for (var i = 0; i <= 14; i++)
+				{
+					if (register_list & (1 << i))
+					{
+						bank[i].set (mmu.read32 (address));
+						address += 4;
+					}
+				}
+
+				if (register_list & (1 << 15))
+				{
+					// FIXME: thumb?
+					bank[CPU.Reg.PC].set (mmu.read32 (address) & ~0x3);
+					address += 4;
+				}
+				
+				if (end_address != address - 4)
+					throw "LDM(1) memory assertion error";
+			}
+		);
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	function registerAccess (func, load, bite, user)
+	{
+		/** @const */ var P = 0x10;
+		/** @const */ var U = 0x08;
+		/** @const */ var B = 0x04;
+		/** @const */ var W = 0x02;
+		/** @const */ var L = 0x01;
+
+		var base = 0x40 | (load ? L : 0) | (bite ? B : 0);
+
+		var ident1;
+		if (user)
+			ident1 = [base | W];
+		else
+			ident1 = [base, base | P, base | W | P];
+
+		// add U flag
+		var len = ident1.length;
+		for (var i = 0; i < len; i++)
+			ident1.push (ident1[i] | U);
+
+		// immediate
+		Core.registerInstruction (func, ident1, -1, false);
+		
+		// register
+		for (var i = 0; i < ident1.length; i++)
+			ident1[i] |= 0x20;
+		Core.registerInstruction (func, ident1, [0, 2, 4, 6, 8, 10, 12, 14], false);
+	}
+
+	function doAccess (cpu, inst, info, func)
+	{
+		/** @const */ var P = 1 << 24;
+		/** @const */ var U = 1 << 23;
+		/** @const */ var W = 1 << 21;
+		/** @const */ var NOT_I = 1 << 25;
+
+		var index;
+		if (inst & NOT_I)
+		{
+			// register offset
+			var m = info.Rm.get ();
+			var shift = (inst >>> 5) & 0x03;
+			var shift_imm = (inst >>> 7) & 0x1F;
+			switch (shift)
+			{
+				case 0:
+					index = m << shift_imm;
+					break;
+				case 1:
+					if (shift_imm == 0)
+						index = 0;
+					else
+						index = m >>> shift_imm;
+					break;
+				case 2:
+					if (shift_imm == 0)
+						index = (m & (1 << 31)) ? -1 : 0;
+					else
+						index = m >> shift_imm;
+					break;
+				case 3:
+					if (shift_imm == 0)
+						index = (!!(cpu.cpsr._value & CPU.Status.C) << 31) | (m >>> 1);
+					else
+						index = Util.rotRight (m, shift_imm);
+					break;
+			}
+		}
+		else
+		{
+			// immediate offset
+			index = inst & 0x0FFF;
+		}
+
+		if (!(inst & U))
+			index = -index;
+
+		var p = !!(inst & P);
+		var w = !!(inst & W);
+
+		var address;
+		if (p)
+		{
+			address = (info.Rn.get () + index) >>> 0;
+			if (w) // pre-indexed
+				info.Rn.set (address);
+		}
+		else // post-indexed
+		{
+			address = info.Rn.get () >>> 0;
+			info.Rn.set (address + index);
+		}
+
+		func (address, info.Rd, cpu.mmu);
+	}
+
+	registerAccess (inst_LDR, true, false, false);
+	function inst_LDR (inst, info)
+	{
+		doAccess (
+			this, inst, info,
+			function (address, Rd, mmu) {
+				// FIXME: assumed that U == 0
+				var data = mmu.read32 (address);
+				data = Util.rotRight (data, 8 * (address & 0x03));
+
+				if (Rd.index == 15)
+				{
+					// FIXME: thumb?
+					Rd.set (data & ~0x3);
+				}
+				else
+				{
+					Rd.set (data);
+				}
+			}
+		);
+	}
+
+	registerAccess (inst_STR, false, false, false);
+	function inst_STR (inst, info)
+	{
+		doAccess (
+			this, inst, info,
+			function (address, Rd, mmu) {
+				// FIXME: armv5 specific
+				mmu.write32 (address & ~0x3, Rd.get ());
+			}
+		);
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	Core.registerInstruction (inst_MRS_CPSR, 0x10, 0, false);
+	function inst_MRS_CPSR (inst, info) { info.Rd.set (this.cpsr.get ()); }
+
+	Core.registerInstruction (inst_MSR, [0x32, 0x36], -1, false);
+	Core.registerInstruction (inst_MSR, [0x12, 0x16], 0, false);
+	function inst_MSR (inst, info)
+	{
+		// masks for armv5
+		/** @const */ var UnallocMask = 0x0FFFFF00;
+		/** @const */ var UserMask = 0xF0000000;
+		/** @const */ var PrivMask = 0x0000000F;
+		/** @const */ var StateMask = 0x00000020;
+
+		/** @const */ var I = 1 << 25;
+		/** @const */ var R = 1 << 22;
+
+		var field_mask = (inst >>> 16) & 0x0F;
+		var operand;
+
+		if (inst & I)
+		{
+			var immed_8 = inst & 0xFF;
+			var rotate_imm = (inst >>> 8) & 0x0F;
+			operand = Util.rotRight (immed_8, rotate_imm * 2);
+		}
+		else
+		{
+			operand = info.Rm.get ();
+		}
+
+		if (operand & UnallocMask)
+			throw "attempted to set reserved PSR bits";
+
+		var byte_mask =
+			(inst & 16 ? 0x000000FF : 0) |
+			(inst & 17 ? 0x0000FF00 : 0) |
+			(inst & 18 ? 0x00FF0000 : 0) |
+			(inst & 19 ? 0xFF000000 : 0);
+		var mask;
+
+		if (inst & R)
+		{
+			var spsr = this.getReg (CPU.Reg.SPSR);
+			if (!spsr)
+				throw "attempted to read non-existent SPSR";
+
+			mask = byte_mask & (UserMask | PrivMask | StateMask);
+			spsr._value = (spsr._value & ~mask) | (operand & mask);
+		}
+		else
+		{
+			if (this.cpsr.getMode () != CPU.Mode.USR)
+			{
+				if (operand & StateMask)
+					throw "attempted to set non-ARM state";
+				else
+					mask = byte_mask & (UserMask | PrivMask);
+			}
+			else
+				mask = byte_mask & UserMask;
+			this.cpsr._value = (this.cpsr._value & ~mask) | (operand & mask);
+		}
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	var instructionTable = Core.instructionTable;
 
 	function evaluateCondition (cond, cpsr)
 	{
 		var val = cpsr._value;
-		var N = !!(val & (1 << 31));
-		var Z = !!(val & (1 << 30));
-		var C = !!(val & (1 << 29));
-		var V = !!(val & (1 << 28));
+		var N = !!(val & CPU.Status.N);
+		var Z = !!(val & CPU.Status.Z);
+		var C = !!(val & CPU.Status.C);
+		var V = !!(val & CPU.Status.V);
 
 		switch (cond)
 		{
@@ -1853,46 +2667,49 @@ var CPU = {};
 			case 12: return !Z && (N == V);
 			case 13: return Z || (N != V);
 			case 14: return true;
+			case 15: return true;
 			default: throw "unhandled condition";
 		}
 	}
-
-	var Core = CPU.Core;
 
 	Core.prototype.tick = function () {
 		var inst = this.mmu.read32 (this.pc._value);
 		this.pc._value += 4;
 
-		var table = uncondTable;
 		var cond = inst >>> 28;
-		if (cond == 0x0F)
-		{
-			table = uncondTable;
-		}
-		else
-		{
-			table = condTable;
-			if (!evaluateCondition (cond, this.cpsr))
-				return;
-		}
+		if (cond < 14 && !evaluateCondition (cond, this.cpsr))
+			return;
 
-		var ident1 = (inst >>> 20) & 0xFF;
-		var ident2 = (inst >>> 4) & 0x0F;
+		var ident = 
+			((cond == 15) << 12) |
+			((inst >>> 16) & 0x0FF0) |
+			((inst >>> 4) & 0x0F);
 
-		var func = table[ident1];
-		if (func instanceof Array)
-			func = func[ident2];
+		var func = instructionTable[ident];
 
 		if (!func)
 		{
-			var msg = 'undefined instruction: ' + Util.hex32 (inst);
+			var ident1 = (ident >>> 4) & 0xFF;;
+			var ident2 = ident & 0x0F;
+			var uncond = (cond == 15);
+
+			var msg = 'undefined instruction at 0x' + Util.hex32 (this.pc._value - 4) +
+				': ' + Util.hex32 (inst);
 			console.log (msg);
 			console.log ('ident1 = 0x' + ident1.toString (16));
 			console.log ('ident2 = 0x' + ident2.toString (16));
+			console.log ('unconditional = ' + uncond);
 			throw msg;
 		}
 
-		func.call (this, inst);
+		var bank = this.getRegBank ();
+		var info = this.info;
+		info.Rn = bank[(inst >>> 16) & 0x0F];
+		info.Rd = bank[(inst >>> 12) & 0x0F];
+		info.Rs = bank[(inst >>>  8) & 0x0F];
+		info.Rm = bank[(inst       ) & 0x0F];
+
+		func.call (this, inst, info);
 	};
 
 })();
@@ -1908,10 +2725,23 @@ var pmem = new Mem.PhysicalMemory ();
 pmem.addDevice (new Mem.RAM (0x0, 0x08000000));
 
 var fs = require('fs');
-loadBuffer (pmem, 0x01000000, fs.readFileSync('./kernel/image'));
-loadBuffer (pmem, 0x02000000, fs.readFileSync('./kernel/board.dtb'));
+loadBuffer (pmem, 0x01008000, fs.readFileSync('./resources/image'));
+loadBuffer (pmem, 0x02000000, fs.readFileSync('./resources/board.dtb'));
 
 var cpu = new CPU.Core (pmem);
-cpu.pc.set (0x01000000);
+cpu.pc.set (0x01008000);
+cpu.getReg (0).set (0);
+cpu.getReg (1).set (0);
+cpu.getReg (2).set (0x02000000);
 while (true)
+{
+	console.log ("executing " + Util.hex32 (cpu.pc._value));
 	cpu.tick ();
+	/*
+	if (cpu.pc._value == 0x0115c27c)
+	{
+		console.log ("kernel error occured!");
+		break;
+	}
+	*/
+}
