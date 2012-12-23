@@ -8,7 +8,7 @@
 	interrupt-parent = <&vic>;
 
 	chosen {
-		bootargs = "earlyprintk debug";
+		bootargs = "earlyprintk debug cachepolicy=uncached";
 	};
 
 	aliases {
