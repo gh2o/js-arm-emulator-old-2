@@ -65,24 +65,6 @@
 
 	CPU.Control = Control;
 
-	// register utility functions
-	/*
-	Register.createGetter = function (bit) {
-		return function () {
-			return !!(this._value & (1 << bit));
-		};
-	};
-	Register.createSetter = function (bit) {
-		var shifted = 1 << bit;
-		return function (state) {
-			if (state)
-				this._value |= shifted;
-			else
-				this._value &= ~shifted;
-		};
-	};
-	*/
-
 	/**
 	 * @constructor
 	 * @param {string} bank
@@ -124,12 +106,6 @@
 	 */
 	function ControlRegister () { goog.base (this, "cp", -1, 0); }
 	goog.inherits (ControlRegister, Register);
-	/*
-	goog.mixin (ControlRegister.prototype, {
-		getM: Register.createGetter (0),
-		setM: Register.createSetter (0)
-	});
-	*/
 	
 	/**
 	 * @constructor
