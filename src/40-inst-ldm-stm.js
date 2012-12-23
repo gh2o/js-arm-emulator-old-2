@@ -17,6 +17,9 @@
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
+		if ((n & 0x03) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
+
 		var pu = (inst >>> 23) & 0x03;
 		switch (pu)
 		{
@@ -38,8 +41,10 @@
 				break;
 		}
 
-		start_address >>>= 0;
-		end_address >>>= 0;
+		start_address = (start_address & ~0x03) >>> 0;
+		end_address = (end_address & ~0x03) >>> 0;
+
+		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 
 		if (inst & W)
 		{
@@ -48,8 +53,6 @@
 			else
 				Rn.set (n - nr4);
 		}
-
-		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 	}
 
 	Core.registerInstruction (inst_LDM_1, [0x81, 0x83, 0x89, 0x8B, 0x91, 0x93, 0x99, 0x9B],
@@ -79,6 +82,30 @@
 				
 				if (end_address != address - 4)
 					throw "LDM(1) memory assertion error";
+			}
+		);
+	}
+
+	Core.registerInstruction (inst_STM_1, [0x80, 0x82, 0x88, 0x8A, 0x90, 0x92, 0x98, 0x9A],
+		-1, false);
+	function inst_STM_1 (inst, info)
+	{
+		doMultiple (
+			this, inst, info,
+			function (start_address, end_address, register_list, bank, mmu)
+			{
+				var address = start_address;
+				for (var i = 0; i <= 15; i++)
+				{
+					if (register_list & (1 << i))
+					{
+						mmu.write32 (address, bank[i].get ());
+						address += 4;
+					}
+				}
+
+				if (end_address != address - 4)
+					throw "STM(1) memory assertion error";
 			}
 		);
 	}

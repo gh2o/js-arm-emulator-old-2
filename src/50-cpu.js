@@ -55,8 +55,8 @@
 			var ident2 = ident & 0x0F;
 			var uncond = (cond == 15);
 
-			var msg = 'undefined instruction at 0x' + Util.hex32 (this.pc._value - 4) +
-				': ' + Util.hex32 (inst);
+			var msg = 'undefined instruction at ' + Util.hex32 (this.pc._value - 4) +
+				' : ' + Util.hex32 (inst);
 			console.log (msg);
 			console.log ('ident1 = 0x' + ident1.toString (16));
 			console.log ('ident2 = 0x' + ident2.toString (16));
@@ -71,7 +71,12 @@
 		info.Rs = bank[(inst >>>  8) & 0x0F];
 		info.Rm = bank[(inst       ) & 0x0F];
 
-		func.call (this, inst, info);
+		try {
+			func.call (this, inst, info);
+		} catch (e) {
+			console.log ("error executing " + Util.hex32 (this.pc._value - 4));
+			throw e;
+		}
 	};
 
 })();

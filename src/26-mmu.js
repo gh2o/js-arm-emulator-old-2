@@ -7,22 +7,125 @@
 	{
 		this.cpu = cpu;
 		this.pmem = pmem;
+		this.regDomain = 0;
+		this.regTable = 0;
 	}
 
 	MMU.prototype = {
-		read32: function (address) {
-			if (this.cpu.creg._value & CPU.Control.M)
-				throw "translated mmu read not implemented";
+
+		read8: function (address, user) {
+			address = this.translate (address, false, user);
+			return this.pmem.read8 (address) & 0xFF;
+		},
+
+		write8: function (address, data) {
+			address = this.translate (address, true, false);
+			this.pmem.write8 (address, data & 0xFF);
+		},
+
+		read16: function (address, user) {
+			if ((address & 0x01) != 0)
+				throw "unaligned 16-bit mmu read";
+			address = this.translate (address, false, user);
+			return this.pmem.read16 (address) & 0xFFFF;
+		},
+
+		write16: function (address, data) {
+			if ((address & 0x01) != 0)
+				throw "unaligned 16-bit mmu write";
+			address = this.translate (address, true, false);
+			this.pmem.write16 (address, data & 0xFFFF);
+		},
+
+		read32: function (address, user) {
 			if ((address & 0x03) != 0)
-				throw "unaligned mmu read not implemented";
+				throw "unaligned 32-bit mmu read";
+			address = this.translate (address, false, user);
 			return this.pmem.read32 (address);
 		},
+
 		write32: function (address, data) {
-			if (this.cpu.creg._value & CPU.Control.M)
-				throw "translated mmu write not implemented";
 			if ((address & 0x03) != 0)
-				throw "unaligned mmu write not implemented";
-			this.pmem.write32 (address, data);
+				throw "unaligned 32-bit mmu write";
+			address = this.translate (address, true, false);
+			this.pmem.write32 (address, data >>> 0);
+		},
+
+		translate: function (inAddr, write, user) {
+
+			if (!(this.cpu.creg._value & CPU.Control.M))
+				return inAddr >>> 0;
+
+			var firstDescAddr = (
+				(this.regTable & 0xffffc000) |
+				((inAddr >>> 18) & ~0x03)
+			) >>> 0;
+			var firstDesc = this.pmem.read32 (firstDescAddr);
+
+			var ap, domain;
+			var outAddr;
+
+			switch (firstDesc & 0x03)
+			{
+				case 0:
+					throw "first level memory fault";
+				case 2:
+					ap = (firstDesc >>> 10) & 0x03;
+					domain = (firstDesc >>> 5) & 0x0F;
+					outAddr = (firstDesc & 0xFFF00000) | (inAddr & 0x000FFFFF);
+					break;
+				default:
+					throw "bad descriptor type";
+			}
+
+			// permission checks
+			var domainType = (this.regDomain >> (2 * domain)) & 0x03;
+			switch (domainType)
+			{
+				case 0:
+				case 2:
+					throw "domain fault";
+				case 3: // manager
+					break;
+				case 1: // client
+					var priv = !user && (this.cpu.cpsr.getMode () != CPU.Mode.USR);
+					var allowed;
+					switch (ap)
+					{
+						case 0:
+							var rs = (this.cpu.creg._value >>> 8) & 0x03;
+							switch (rs)
+							{
+								case 0: // R=0, S=0
+									allowed = false;
+									break;
+								case 1: // R=0, S=1
+									allowed = priv && !write;
+									break;
+								case 2: // R=1, S=0
+									allowed = !write;
+									break;
+								case 3: // R=1, S=1
+									throw "bad RS";
+									break;
+							}
+							break;
+						case 1:
+							allowed = priv;
+							break;
+						case 2:
+							allowed = priv || !write;
+							break;
+						case 3:
+							allowed = true;
+							break;
+					}
+					if (!allowed)
+						throw "permission fault";
+					break;
+			}
+
+			return outAddr >>> 0;
 		}
 	};
 

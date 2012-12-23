@@ -169,6 +169,19 @@
 		);
 	}
 
+	function addFlagsFunc (a, b, r, sco, orig)
+	{
+		var a31 = !!(a & (1 << 31));
+		var b31 = !!(b & (1 << 31));
+		var r31 = !!(r & (1 << 31));
+		return (
+			(r & (1 << 31) ? CPU.Status.N : 0) |
+			(r == 0 ? CPU.Status.Z : 0) |
+			((a31 && b31) || (b31 && !r31) || (!r31 && a31) ? CPU.Status.C : 0) |
+			((a31 == b31) && (a31 != r31) ? CPU.Status.V : 0)
+		);
+	}
+
 	function subFlagsFunc (a, b, r, sco, orig)
 	{
 		var a31 = !!(a & (1 << 31));
@@ -182,6 +195,11 @@
 		);
 	}
 
+	function rsbFlagsFunc (a, b, r, sco, orig)
+	{
+		return subFlagsFunc (b, a, r, sco, orig);
+	}
+
 	registerData (inst_AND, 0x00);
 	function inst_AND (inst, info)
 	{
@@ -192,12 +210,33 @@
 		);
 	}
 
+	registerData (inst_EOR, 0x02);
+	function inst_EOR (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return a ^ b; },
+			commonFlagsFunc
+		);
+	}
+
 	registerData (inst_SUB, 0x04);
 	function inst_SUB (inst, info)
 	{
 		doData (
 			this, inst, info, true,
-			function (a, b) { return a - b; }
+			function (a, b) { return a - b; },
+			subFlagsFunc
+		);
+	}
+
+	registerData (inst_RSB, 0x06);
+	function inst_RSB (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return b - a; },
+			rsbFlagsFunc
 		);
 	}
 
@@ -206,7 +245,34 @@
 	{
 		doData (
 			this, inst, info, true,
-			function (a, b) { return a + b; }
+			function (a, b) { return a + b; },
+			addFlagsFunc
+		);
+	}
+
+	registerData (inst_ADC, 0x0a);
+	function inst_ADC (inst, info)
+	{
+		var c = !!(this.cpsr._value & CPU.Status.C);
+		doData (
+			this, inst, info, true,
+			c ?
+				function (a, b) { return a + b + 1; } :
+				function (a, b) { return a + b; },
+			addFlagsFunc
+		);
+	}
+
+	registerData (inst_SBC, 0x0c);
+	function inst_SBC (inst, info)
+	{
+		var c = !!(this.cpsr._value & CPU.Status.C);
+		doData (
+			this, inst, info, true,
+			c ? 
+				function (a, b) { return a - b; } :
+				function (a, b) { return a - b - 1; },
+			subFlagsFunc
 		);
 	}
 
@@ -240,6 +306,16 @@
 		);
 	}
 
+	registerData (inst_CMN, 0x17);
+	function inst_CMN (inst, info)
+	{
+		doData (
+			this, inst, info, false,
+			function (a, b) { return a + b; },
+			addFlagsFunc
+		);
+	}
+
 	registerData (inst_ORR, 0x18);
 	function inst_ORR (inst, info)
 	{
@@ -266,6 +342,16 @@
 		doData (
 			this, inst, info, true,
 			function (a, b) { return a & ~b; },
+			commonFlagsFunc
+		);
+	}
+
+	registerData (inst_MVN, 0x1e);
+	function inst_MVN (inst, info)
+	{
+		doData (
+			this, inst, info, true,
+			function (a, b) { return ~b; },
 			commonFlagsFunc
 		);
 	}

@@ -32,12 +32,17 @@
 		Core.registerInstruction (func, ident1, [0, 2, 4, 6, 8, 10, 12, 14], false);
 	}
 
-	function doAccess (cpu, inst, info, func)
+	function doAccess (cpu, inst, info, alignment, func)
 	{
 		/** @const */ var P = 1 << 24;
 		/** @const */ var U = 1 << 23;
 		/** @const */ var W = 1 << 21;
 		/** @const */ var NOT_I = 1 << 25;
+
+		var Rn = info.Rn;
+		var n = Rn.get ();
+		if ((n & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		var index;
 		if (inst & NOT_I)
@@ -83,36 +88,31 @@
 		var p = !!(inst & P);
 		var w = !!(inst & W);
 
-		var address;
-		if (p)
-		{
-			address = (info.Rn.get () + index) >>> 0;
-			if (w) // pre-indexed
-				info.Rn.set (address);
-		}
-		else // post-indexed
-		{
-			address = info.Rn.get () >>> 0;
-			info.Rn.set (address + index);
-		}
+		var address = p ? n + index : n;
+		address >>>= 0;
 
 		func (address, info.Rd, cpu.mmu);
+
+		if (p && w)
+			Rn.set (address);
+		else if (!p)
+			Rn.set (address + index);
 	}
 
 	registerAccess (inst_LDR, true, false, false);
 	function inst_LDR (inst, info)
 	{
 		doAccess (
-			this, inst, info,
+			this, inst, info, 4,
 			function (address, Rd, mmu) {
 				// FIXME: assumed that U == 0
-				var data = mmu.read32 (address);
+				var data = mmu.read32 (address & ~0x03);
 				data = Util.rotRight (data, 8 * (address & 0x03));
 
 				if (Rd.index == 15)
 				{
 					// FIXME: thumb?
-					Rd.set (data & ~0x3);
+					Rd.set (data & ~0x03);
 				}
 				else
 				{
@@ -126,12 +126,42 @@
 	function inst_STR (inst, info)
 	{
 		doAccess (
-			this, inst, info,
+			this, inst, info, 4,
 			function (address, Rd, mmu) {
 				// FIXME: armv5 specific
-				mmu.write32 (address & ~0x3, Rd.get ());
+				mmu.write32 (address & ~0x03, Rd.get ());
 			}
 		);
+	}
+
+	registerAccess (inst_LDRB, true, true, false);
+	function inst_LDRB (inst, info)
+	{
+		doAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu) {
+				Rd.set (mmu.read8 (address));
+			}
+		);
+	}
+
+	registerAccess (inst_STRB, false, true, false);
+	function inst_STRB (inst, info)
+	{
+		doAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu) {
+				mmu.write8 (address, Rd.get () & 0xFF);
+			}
+		);
+	}
+
+	Core.registerInstruction (inst_PLD, [0x55, 0x5D], -1, true);
+	Core.registerInstruction (inst_PLD, [0x75, 0x7D], [0, 2, 4, 6, 8, 10, 12, 14], true);
+	function inst_PLD (inst, info)
+	{
+		// only to do pre/post-index
+		doAccess (this, inst, info, 1, function () {});
 	}
 
 })();

@@ -16,15 +16,39 @@
 	}
 
 	RAM.prototype = {
+		read8: function (offset) {
+			var base = offset & ~0x03, index = offset & 0x03, shift = index * 8;
+			return (this.read32 (base) >>> shift) & 0xFF;
+		},
+		write8: function (offset, data) {
+			var base = offset & ~0x03, index = offset & 0x03, shift = index * 8;
+			var val = this.read32 (base);
+			val = (val & ~(0xFF << shift)) | ((data & 0xFF) << shift);
+			this.write32 (base, val);
+		},
+		read16: function (offset) {
+			if (offset & 0x01)
+				throw 'unaligned 16-bit RAM read';
+			var base = offset & ~0x03, index = offset & 0x03, shift = index * 8;
+			return (this.read32 (base) >>> shift) & 0xFFFF;
+		},
+		write16: function (offset, data) {
+			if (offset & 0x01)
+				throw 'unaligned 16-bit RAM write';
+			var base = offset & ~0x03, index = offset & 0x03, shift = index * 8;
+			var val = this.read32 (base);
+			val = (val & ~(0xFFFF << shift)) | ((data & 0xFFFF) << shift);
+			this.write32 (base, val);
+		},
 		read32: function (offset) {
 			if ((offset & 0x03) != 0)
-				throw 'unaligned RAM read';
+				throw 'unaligned 32-bit RAM read';
 			var block = this.blocks[numBlock(offset)];
 			return block ? block[numIndex(offset) >> 2] : 0;
 		},
 		write32: function (offset, data) {
 			if ((offset & 0x03) != 0)
-				throw 'unaligned RAM write';
+				throw 'unaligned 32-bit RAM write';
 			var block = this.blocks[numBlock(offset)];
 			if (!block)
 			{

@@ -17,4 +17,19 @@
 		this.pc.set (this.pc.get () + offset);
 	}
 
+	Core.registerInstruction (inst_BX, 0x12, 1, false);
+	function inst_BX (inst, info)
+	{
+		// FIXME: thumb?
+		this.pc.set (info.Rm.get () & ~0x03);
+	}
+
+	Core.registerInstruction (inst_BLX, 0x12, 3, false);
+	function inst_BLX (inst, info)
+	{
+		// FIXME: thumb?
+		this.getReg (CPU.Reg.LR).set (this.pc._value);
+		this.pc.set (info.Rm.get () & ~0x03);
+	}
+
 })();

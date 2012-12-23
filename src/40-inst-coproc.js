@@ -10,7 +10,13 @@
 			{
 				if (o2 == 0)
 				{
+					// system ID
 					return 0x41069260;
+				}
+				else if (o2 == 1)
+				{
+					// cache type (none)
+					return 0x01004004;
 				}
 			}
 			else if (n == 1)
@@ -20,7 +26,8 @@
 					return cpu.creg._value;
 				}
 			}
-			throw "bad CP15 read";
+			throw "bad CP15 read: n=" + n + ", m=" + m +
+				", o1=" + o1 + ", o2=" + o2;
 		},
 		write: function (cpu, n, m, o1, o2, data) {
 			if (n == 1)
@@ -51,6 +58,16 @@
 				if (m == 7 && o2 == 0)
 				{
 					// FIXME: invalidate all caches
+					return;
+				}
+				else if (m == 10 && o2 == 1)
+				{
+					// FIXME: clean data cache line (MVA)
+					return;
+				}
+				else if (m == 10 && o2 == 2)
+				{
+					// FIXME: clean data cache line (set/way)
 					return;
 				}
 				else if (m == 10 && o2 == 4)
