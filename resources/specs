@@ -37,3 +37,8 @@ device drivers
 file systems
 	pseudo filesystems -> tmpfs
 
+kernel hacking
+	kernel debugging
+	turn off scheduler debugging
+	kernel low-level debugging
+	early printk
