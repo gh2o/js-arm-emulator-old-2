@@ -26,6 +26,14 @@
 					return cpu.creg._value;
 				}
 			}
+			else if (n == 7)
+			{
+				if (m == 14 && o2 == 3)
+				{
+					// test, clean, and invalidate data cache
+					return CPU.Status.ALL;
+				}
+			}
 			throw "bad CP15 read: n=" + n + ", m=" + m +
 				", o1=" + o1 + ", o2=" + o2;
 		},
@@ -55,7 +63,17 @@
 			}
 			else if (n == 7)
 			{
-				if (m == 7 && o2 == 0)
+				if (m == 5 && o2 == 0)
+				{
+					// FIXME: invalidate entire instruction cache
+					return;
+				}
+				else if (m == 5 && o2 == 1)
+				{
+					// FIXME: invalidate instruction cache line (MVA)
+					return;
+				}
+				else if (m == 7 && o2 == 0)
 				{
 					// FIXME: invalidate all caches
 					return;
@@ -75,10 +93,30 @@
 					// FIXME: data sync barrier
 					return;
 				}
+				else if (m == 14 && o2 == 1)
+				{
+					// FIXME: clean and invalidate data cache line (MVA)
+					return;
+				}
 			}
 			else if (n == 8)
 			{
-				if (m == 7 && o2 == 0)
+				if (m == 5 && o2 == 0)
+				{
+					// FIXME: invalidate entire instruction TLB
+					return;
+				}
+				else if (m == 6 && o2 == 0)
+				{
+					// FIXME: invalidate entire data TLB
+					return;
+				}
+				else if (m == 6 && o2 == 2)
+				{
+					// FIXME: invalidate on ASID match data TLB
+					return;
+				}
+				else if (m == 7 && o2 == 0)
 				{
 					// FIXME: invalidate all TLBs
 					return;
@@ -106,7 +144,18 @@
 		if (!coprocessor)
 			throw "bad coprocessor number";
 
-		info.Rd.set (coprocessor.read (this, CRn, CRm, opcode_1, opcode_2));
+		var Rd = info.Rd;
+		var data = coprocessor.read (this, CRn, CRm, opcode_1, opcode_2);
+		if (Rd.index == CPU.Reg.PC)
+		{
+			var mask = CPU.Status.ALL;
+			var cpsr = this.cpsr;
+			cpsr._value = (cpsr._value & ~mask) | (data & mask);
+		}
+		else
+		{
+			info.Rd.set (data);
+		}
 	}
 
 	Core.registerInstruction (inst_MCR,

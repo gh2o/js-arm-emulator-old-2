@@ -53,8 +53,9 @@
 
 		translate: function (inAddr, write, user) {
 
+			inAddr >>>= 0;
 			if (!(this.cpu.creg._value & CPU.Control.M))
-				return inAddr >>> 0;
+				return inAddr;
 
 			var firstDescAddr = (
 				(this.regTable & 0xffffc000) |
@@ -62,23 +63,52 @@
 			) >>> 0;
 			var firstDesc = this.pmem.read32 (firstDescAddr);
 
-			var ap, domain;
+			var ap;
 			var outAddr;
 
-			switch (firstDesc & 0x03)
+			var firstType = firstDesc & 0x03;
+			switch (firstType)
 			{
 				case 0:
-					throw "first level memory fault";
-				case 2:
+					throw new Error ("first level translation fault");
+				case 2: // section
 					ap = (firstDesc >>> 10) & 0x03;
-					domain = (firstDesc >>> 5) & 0x0F;
 					outAddr = (firstDesc & 0xFFF00000) | (inAddr & 0x000FFFFF);
 					break;
 				default:
-					throw "bad descriptor type";
+					var secondDescAddr = (
+						firstType == 1 ?
+							(
+							 	// coarse
+							 	(firstDesc & 0xfffffc00) |
+								((inAddr >>> 10) & 0x03fc)
+							)
+							:
+							(
+							 	// fine
+								(firstDesc & 0xfffff000) |
+								((inAddr >>> 8) & 0x0ffc)
+							)
+					) >>> 0;
+					var secondDesc = this.pmem.read32 (secondDescAddr);
+					var secondType = secondDesc & 0x03;
+					switch (secondType)
+					{
+						case 0:
+							throw new Error ("second level translation fault");
+						case 2: // small page
+							outAddr = (secondDesc & 0xfffff000) | (inAddr & 0x0fff);
+							var qt = (outAddr >>> 10) & 0x03;
+							ap = (secondDesc >>> (4 + 2 * qt)) & 0x03;
+							break;
+						default:
+							throw new Error ("unimplemented second level type");
+					}
+					break;
 			}
 
 			// permission checks
+			var domain = (firstDesc >>> 5) & 0x0F;
 			var domainType = (this.regDomain >> (2 * domain)) & 0x03;
 			switch (domainType)
 			{

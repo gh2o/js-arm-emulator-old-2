@@ -17,8 +17,6 @@
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & 0x03) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var pu = (inst >>> 23) & 0x03;
 		switch (pu)
@@ -43,6 +41,9 @@
 
 		start_address = (start_address & ~0x03) >>> 0;
 		end_address = (end_address & ~0x03) >>> 0;
+
+		if ((start_address & 0x03) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 

@@ -1559,6 +1559,7 @@ var CPU = {};
 })();
 (function () {
 
+	Peripherals.UART = UART;
 	function UART (start, callback)
 	{
 		this.start = start;
@@ -1566,22 +1567,214 @@ var CPU = {};
 		this.callback = callback || (function () {});
 	}
 
-	UART.prototype = {
-		read32: function (offset) {
-			if (offset == 24)
-				return 0x40;
-			else
-				throw "bad UART register " + offset;
-		},
-		write8: function (offset, data) {
-			if (offset == 0)
-				this.callback (data);
-			else
-				throw "bad UART register " + offset;
-		},
+	UART.prototype.read32 = function (offset) {
+		if (offset == 0x18)
+			return 0x40;
+		else
+			throw "bad UART register " + offset;
 	};
 
-	Peripherals.UART = UART;
+	UART.prototype.write8 = function (offset, data) {
+		if (offset == 0)
+			this.callback (data);
+		else
+			throw "bad UART register " + offset;
+	};
+
+	Peripherals.SystemRegisters = SystemRegisters;
+	function SystemRegisters (start, mscallback)
+	{
+		this.start = start;
+		this.size = 4096;
+		this.mscallback = mscallback;
+
+		this.sys24clk = 0;
+		this.sys24ms = 0;
+	}
+
+	SystemRegisters.prototype.read32 = function (offset) {
+		if (offset == 0x5c)
+		{
+			var ms = this.mscallback ();
+			var dms = ms - this.sys24ms;
+			this.sys24ms = ms;
+
+			var clk = this.sys24clk =
+				(this.sys24clk + dms * 24000) % 0x100000000;
+			return clk >>> 0;
+		}
+		else
+		{
+			throw "bad system register " + offset;
+		}
+	}
+
+	Peripherals.SystemController = SystemController;
+	function SystemController (start)
+	{
+		this.start = start;
+		this.size = 4096;
+	}
+
+	SystemController.prototype.read32 = function (offset) {
+		switch (offset)
+		{
+			case 0x00: // no clue what this is ...
+				return 0;
+			default:
+				throw "bad system controller register " + offset;
+		}
+	};
+
+	SystemController.prototype.write32 = function (offset) {
+		switch (offset)
+		{
+			case 0x00:
+				console.log (">>> FIXME: write to sys controller base");
+				break;
+			default:
+				throw "bad system controller register " + offset;
+		}
+	};
+
+	Peripherals.DualTimer = DualTimer;
+	function DualTimer (start)
+	{
+		function Timer () {}
+		Timer.prototype = {
+			control: 0,
+			load: 0,
+			value: 0xFFFFFFFF
+		};
+
+		this.start = start;
+		this.size = 4096;
+		this.timers = [new Timer (), new Timer ()];
+	}
+
+	DualTimer.prototype.write32 = function (offset, data) {
+		if (offset < 0x40)
+		{
+			timer = this.timers[offset >>> 5];
+			switch (offset & 0x1f)
+			{
+				case 0x00:
+					timer.load = data;
+					break;
+				case 0x04:
+					timer.value = data;
+					break;
+				case 0x08:
+					timer.control = data & 0xFF;
+					break;
+				default:
+					throw "bad timer register " + offset;
+			}
+		}
+		else
+		{
+			throw "bad timer register " + offset;
+		}
+	};
+
+	// FIXME: VIC protection
+	Peripherals.VIC = VIC;
+	function VIC (start)
+	{
+		this.start = start;
+		this.size = 65536;
+
+		this.regDefVectAddr = 0;
+		this.regVectAddr = 0;
+		this.regIntEnable = 0;
+		this.regSoftEnable = 0;
+		this.flagProtection = false;
+
+		this.regsVectCntl = [];
+		for (var i = 0; i < 16; i++)
+			this.regsVectCntl.push (0);
+	}
+
+	VIC.prototype.read32 = function (offset) {
+		switch (offset)
+		{
+			case 0x30:
+				console.log (">>> FIXME: read from vectaddr");
+				return this.regVectAddr;
+			case 0xFE0:
+				return 0x90;
+			case 0xFE4:
+				return 0x11;
+			case 0xFE8:
+				return 0x04;
+			case 0xFEC:
+				return 0x00;
+			default:
+				throw "bad VIC read " + offset;
+		}
+	};
+
+	VIC.prototype.write32 = function (offset, data) {
+		switch (offset)
+		{
+			case 0x0C:
+				if (data != 0)
+					throw "VIC FIQs not implemented";
+				break;
+			case 0x10:
+				this.regIntEnable |= data;
+				break;
+			case 0x14:
+				this.regIntEnable &= ~data;
+				break;
+			case 0x1C:
+				this.regSoftEnable &= ~data;
+				break;
+			case 0x30:
+				console.log (">>> FIXME: write to vectaddr");
+				this.regVectAddr = data;
+				break;
+			case 0x34:
+				this.regDefVectAddr = data;
+				break;
+			case 0x0300:
+				if (data & 1)
+					throw "VIC test mode not implemented";
+				break;
+			default:
+				if (offset >= 0x200 && offset < 0x240)
+				{
+					var index = (offset - 0x200) >> 2;
+					this.regsVectCntl[index] = data;
+					break;
+				}
+				throw "bad VIC write " + offset + " (" + Util.hex32 (data) + ")";
+		}
+	}
+
+	Peripherals.SIC = SIC;
+	function SIC (start)
+	{
+		this.start = start;
+		this.size = 4096;
+
+		this.regEnable = 0;
+		this.regPICEnable = 0;
+	}
+
+	SIC.prototype.write32 = function (offset, data) {
+		switch (offset)
+		{
+			case 0x0C:
+				this.regEnable &= ~data;
+				break;
+			case 0x20:
+				this.regPICEnable |= data;
+				break;
+			default:
+				throw "bad SIC write " + offset + " (" + Util.hex32 (data) + ")";
+		}
+	};
 
 })();
 (function () {
@@ -1765,8 +1958,9 @@ var CPU = {};
 
 		translate: function (inAddr, write, user) {
 
+			inAddr >>>= 0;
 			if (!(this.cpu.creg._value & CPU.Control.M))
-				return inAddr >>> 0;
+				return inAddr;
 
 			var firstDescAddr = (
 				(this.regTable & 0xffffc000) |
@@ -1774,23 +1968,52 @@ var CPU = {};
 			) >>> 0;
 			var firstDesc = this.pmem.read32 (firstDescAddr);
 
-			var ap, domain;
+			var ap;
 			var outAddr;
 
-			switch (firstDesc & 0x03)
+			var firstType = firstDesc & 0x03;
+			switch (firstType)
 			{
 				case 0:
-					throw "first level memory fault";
-				case 2:
+					throw new Error ("first level translation fault");
+				case 2: // section
 					ap = (firstDesc >>> 10) & 0x03;
-					domain = (firstDesc >>> 5) & 0x0F;
 					outAddr = (firstDesc & 0xFFF00000) | (inAddr & 0x000FFFFF);
 					break;
 				default:
-					throw "bad descriptor type";
+					var secondDescAddr = (
+						firstType == 1 ?
+							(
+							 	// coarse
+							 	(firstDesc & 0xfffffc00) |
+								((inAddr >>> 10) & 0x03fc)
+							)
+							:
+							(
+							 	// fine
+								(firstDesc & 0xfffff000) |
+								((inAddr >>> 8) & 0x0ffc)
+							)
+					) >>> 0;
+					var secondDesc = this.pmem.read32 (secondDescAddr);
+					var secondType = secondDesc & 0x03;
+					switch (secondType)
+					{
+						case 0:
+							throw new Error ("second level translation fault");
+						case 2: // small page
+							outAddr = (secondDesc & 0xfffff000) | (inAddr & 0x0fff);
+							var qt = (outAddr >>> 10) & 0x03;
+							ap = (secondDesc >>> (4 + 2 * qt)) & 0x03;
+							break;
+						default:
+							throw new Error ("unimplemented second level type");
+					}
+					break;
 			}
 
 			// permission checks
+			var domain = (firstDesc >>> 5) & 0x0F;
 			var domainType = (this.regDomain >> (2 * domain)) & 0x03;
 			switch (domainType)
 			{
@@ -2022,13 +2245,12 @@ var CPU = {};
 		};
 	}
 
-	Core.prototype = {
-		getRegBank: function () {
-			return this.regbanks[this.cpsr.getMode()];
-		},
-		getReg: function (n) {
-			return this.getRegBank()[n];
-		}
+	Core.prototype.getRegBank = function () {
+		return this.regbanks[this.cpsr.getMode()];
+	};
+
+	Core.prototype.getReg = function (n) {
+		return this.getRegBank()[n];
 	};
 
 	CPU.Core = Core;
@@ -2086,6 +2308,31 @@ var CPU = {};
 			throw "reregistration of instruction!";
 		instructionTable[ident] = func;
 	};
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	Core.registerInstruction (inst_CLZ, 0x16, 1, false);
+	function inst_CLZ (inst, info)
+	{
+		var x = info.Rm.get ();
+
+		x |= x >>> 1;
+		x |= x >>> 2;
+		x |= x >>> 4;
+		x |= x >>> 8;
+		x |= x >>> 16;
+
+		x -= (x >>> 1) & 0x55555555;
+		x = ((x >>> 2) & 0x33333333) + (x & 0x33333333);
+		x = ((x >>> 4) + x) & 0x0F0F0F0F;
+		x = ((x >>> 8) + x) & 0x00FF00FF;
+		x = ((x >>> 16) + x) & 0x0000FFFF;
+
+		info.Rd.set (32 - x);
+	}
 
 })();
 (function () {
@@ -2151,6 +2398,14 @@ var CPU = {};
 					return cpu.creg._value;
 				}
 			}
+			else if (n == 7)
+			{
+				if (m == 14 && o2 == 3)
+				{
+					// test, clean, and invalidate data cache
+					return CPU.Status.ALL;
+				}
+			}
 			throw "bad CP15 read: n=" + n + ", m=" + m +
 				", o1=" + o1 + ", o2=" + o2;
 		},
@@ -2180,7 +2435,17 @@ var CPU = {};
 			}
 			else if (n == 7)
 			{
-				if (m == 7 && o2 == 0)
+				if (m == 5 && o2 == 0)
+				{
+					// FIXME: invalidate entire instruction cache
+					return;
+				}
+				else if (m == 5 && o2 == 1)
+				{
+					// FIXME: invalidate instruction cache line (MVA)
+					return;
+				}
+				else if (m == 7 && o2 == 0)
 				{
 					// FIXME: invalidate all caches
 					return;
@@ -2200,10 +2465,30 @@ var CPU = {};
 					// FIXME: data sync barrier
 					return;
 				}
+				else if (m == 14 && o2 == 1)
+				{
+					// FIXME: clean and invalidate data cache line (MVA)
+					return;
+				}
 			}
 			else if (n == 8)
 			{
-				if (m == 7 && o2 == 0)
+				if (m == 5 && o2 == 0)
+				{
+					// FIXME: invalidate entire instruction TLB
+					return;
+				}
+				else if (m == 6 && o2 == 0)
+				{
+					// FIXME: invalidate entire data TLB
+					return;
+				}
+				else if (m == 6 && o2 == 2)
+				{
+					// FIXME: invalidate on ASID match data TLB
+					return;
+				}
+				else if (m == 7 && o2 == 0)
 				{
 					// FIXME: invalidate all TLBs
 					return;
@@ -2231,7 +2516,18 @@ var CPU = {};
 		if (!coprocessor)
 			throw "bad coprocessor number";
 
-		info.Rd.set (coprocessor.read (this, CRn, CRm, opcode_1, opcode_2));
+		var Rd = info.Rd;
+		var data = coprocessor.read (this, CRn, CRm, opcode_1, opcode_2);
+		if (Rd.index == CPU.Reg.PC)
+		{
+			var mask = CPU.Status.ALL;
+			var cpsr = this.cpsr;
+			cpsr._value = (cpsr._value & ~mask) | (data & mask);
+		}
+		else
+		{
+			info.Rd.set (data);
+		}
 	}
 
 	Core.registerInstruction (inst_MCR,
@@ -2321,7 +2617,7 @@ var CPU = {};
 						shifter_operand = rm << sval;
 						shifter_carry_out = rm & (1 << (32 - sval));
 					}
-					else if (s == 32)
+					else if (sval == 32)
 					{
 						shifter_operand = 0;
 						shifter_carry_out = rm & (1 << 0);
@@ -2533,6 +2829,19 @@ var CPU = {};
 		);
 	}
 
+	registerData (inst_RSC, 0x0e);
+	function inst_RSC (inst, info)
+	{
+		var c = !!(this.cpsr._value & CPU.Status.C);
+		doData (
+			this, inst, info, true,
+			c ? 
+				function (a, b) { return b - a; } :
+				function (a, b) { return b - a - 1; },
+			rsbFlagsFunc
+		);
+	}
+
 	registerData (inst_TST, 0x11);
 	function inst_TST (inst, info)
 	{
@@ -2633,8 +2942,6 @@ var CPU = {};
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & 0x03) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var pu = (inst >>> 23) & 0x03;
 		switch (pu)
@@ -2659,6 +2966,9 @@ var CPU = {};
 
 		start_address = (start_address & ~0x03) >>> 0;
 		end_address = (end_address & ~0x03) >>> 0;
+
+		if ((start_address & 0x03) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 
@@ -2770,8 +3080,6 @@ var CPU = {};
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var index;
 		if (inst & NOT_I)
@@ -2819,6 +3127,9 @@ var CPU = {};
 
 		var address = p ? n + index : n;
 		address >>>= 0;
+
+		if ((address & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (address, info.Rd, cpu.mmu);
 
@@ -2917,8 +3228,6 @@ var CPU = {};
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var index;
 		if (inst & I)
@@ -2934,6 +3243,9 @@ var CPU = {};
 
 		var address = p ? n + index : n;
 		address >>>= 0;
+
+		if ((address & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (address, info.Rd, cpu.mmu, cpu);
 
@@ -2986,6 +3298,16 @@ var CPU = {};
 		);
 	}
 
+	registerMiscAccess (inst_LDRSB, true, 13);
+	function inst_LDRSB (inst, info)
+	{
+		doMiscAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu, cpu) {
+				Rd.set (mmu.read8 (address) << 24 >> 24);
+			}
+		);
+	}
 
 	registerMiscAccess (inst_STRD, false, 15);
 	function inst_STRD (inst, info)
@@ -3032,6 +3354,47 @@ var CPU = {};
 		return r >>> 0;
 	}
 
+	function umult64 (p, q)
+	{
+		var a = p >>> 16;
+		var b = p & 0xFFFF;
+		var c = q >>> 16;
+		var d = q & 0xFFFF;
+
+		// multiply base parts
+		var lo = b * d;
+		var hi = a * c;
+
+		// add middle part
+		var mid = a * d + b * c;
+		hi += (mid > 0xFFFFFFFF) ? 0x10000 : 0;
+		lo += (mid << 16) >>> 0;
+		hi += (mid >>> 16);
+
+		// do carry
+		hi += (lo > 0xFFFFFFFF) ? 1 : 0;
+
+		// truncate
+		lo >>>= 0;
+		hi >>>= 0;
+
+		return {lo: lo, hi: hi};
+	}
+
+	function smult64 (p, q)
+	{
+		var ret = umult64 (Math.abs (p), Math.abs (q));
+		if ((p ^ q) & (1 << 31))
+		{
+			// flip
+			ret.hi = ~ret.hi >>> 0;
+			ret.lo = -ret.lo >>> 0;
+			if (ret.lo == 0) // carry
+				ret.hi = (ret.hi + 1) >>> 0;
+		}
+		return ret;
+	}
+
 	function setFlags (cpu, nin, z)
 	{
 		var val = cpu.cpsr._value;
@@ -3070,6 +3433,57 @@ var CPU = {};
 		Rd.set (res);
 		if (inst & S)
 			setFlags (this, res, res == 0);
+	}
+
+	Core.registerInstruction (inst_SMULL_UMULL_SMLAL_UMLAL,
+		[0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F], 9, false);
+	function inst_SMULL_UMULL_SMLAL_UMLAL (inst, info)
+	{
+		/** @const */ var S = 1 << 20;
+		/** @const */ var ACCUM = 1 << 21;
+		/** @const */ var SIGNED = 1 << 22;
+
+		var RdHi = info.Rn;
+		var RdLo = info.Rd;
+		var Rs = info.Rs;
+		var Rm = info.Rm;
+		
+		var p = Rm.get (), q = Rs.get ();
+		var r = (inst & SIGNED) ? smult64 (p, q) : umult64 (p, q);
+
+		var tlo = r.lo;
+		var thi = r.hi;
+
+		if (inst & ACCUM)
+		{
+			tlo += RdLo.get ();
+			thi += RdHi.get () + (tlo > 0xFFFFFFFF ? 1 : 0);
+		}
+
+		RdLo.set (tlo);
+		RdHi.set (thi);
+
+		if (inst & S)
+			setFlags (this, thi, (tlo == 0) && (thi == 0));
+	}
+
+})();
+(function () {
+
+	var Core = CPU.Core;
+
+	Core.registerInstruction (inst_SWP, 0x10, 9, false);
+	function inst_SWP (inst, info)
+	{
+		var address = info.Rn.get ();
+		if ((address & 0x03) && (this.creg._value & CPU.Control.A))
+			throw "swp alignment fault";
+
+		// assumed that U==0
+		var temp = this.mmu.read32 (address & ~0x03);
+		temp = Util.rotRight (temp, 8 * (address & 0x03));
+		this.mmu.write32 (address & ~0x03, info.Rm.get ());
+		info.Rd.set (temp);
 	}
 
 })();
@@ -3219,7 +3633,17 @@ var CPU = {};
 			func.call (this, inst, info);
 		} catch (e) {
 			console.log ("error executing " + Util.hex32 (this.pc._value - 4));
+			this.dumpRegisters ();
 			throw e;
+		}
+	};
+
+	Core.prototype.dumpRegisters = function () {
+		console.log ("registers:");
+		for (var i = 0; i < 18; i++)
+		{
+			var reg = this.getReg (i);
+			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg.get ()));
 		}
 	};
 
@@ -3234,9 +3658,18 @@ function loadBuffer (mem, addr, buf)
 
 var pmem = new Mem.PhysicalMemory ();
 pmem.addDevice (new Mem.RAM (0x0, 0x08000000));
+pmem.addDevice (new Peripherals.SystemController (0x101e0000));
+pmem.addDevice (new Peripherals.SystemRegisters (0x10000000, function () {
+	var hrt = process.hrtime ();
+	return (hrt[0] * 1000) + (hrt[1] / 1000000);
+}));
 pmem.addDevice (new Peripherals.UART (0x101f1000, function (data) {
 	process.stdout.write (String.fromCharCode (data));
 }));
+pmem.addDevice (new Peripherals.VIC (0x10140000));
+pmem.addDevice (new Peripherals.SIC (0x10003000));
+pmem.addDevice (new Peripherals.DualTimer (0x101e2000));
+pmem.addDevice (new Peripherals.DualTimer (0x101e3000));
 
 var fs = require('fs');
 loadBuffer (pmem, 0x00008000, fs.readFileSync('./resources/image'));
@@ -3249,15 +3682,10 @@ cpu.getReg (1).set (0);
 cpu.getReg (2).set (0x01000000);
 while (true)
 {
+	var pc = cpu.pc._value;
 	/*
-	console.log ("executing " + Util.hex32 (cpu.pc._value));
+	if (pc >= 0xc0164304 && pc < 0xc01647b8)
+		console.log (Util.hex32 (pc));
 	*/
 	cpu.tick ();
-	/*
-	if (cpu.pc._value == 0x0115c27c)
-	{
-		console.log ("kernel error occured!");
-		break;
-	}
-	*/
 }

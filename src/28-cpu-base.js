@@ -177,13 +177,12 @@
 		};
 	}
 
-	Core.prototype = {
-		getRegBank: function () {
-			return this.regbanks[this.cpsr.getMode()];
-		},
-		getReg: function (n) {
-			return this.getRegBank()[n];
-		}
+	Core.prototype.getRegBank = function () {
+		return this.regbanks[this.cpsr.getMode()];
+	};
+
+	Core.prototype.getReg = function (n) {
+		return this.getRegBank()[n];
 	};
 
 	CPU.Core = Core;

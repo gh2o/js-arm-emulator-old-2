@@ -64,7 +64,7 @@
 						shifter_operand = rm << sval;
 						shifter_carry_out = rm & (1 << (32 - sval));
 					}
-					else if (s == 32)
+					else if (sval == 32)
 					{
 						shifter_operand = 0;
 						shifter_carry_out = rm & (1 << 0);
@@ -273,6 +273,19 @@
 				function (a, b) { return a - b; } :
 				function (a, b) { return a - b - 1; },
 			subFlagsFunc
+		);
+	}
+
+	registerData (inst_RSC, 0x0e);
+	function inst_RSC (inst, info)
+	{
+		var c = !!(this.cpsr._value & CPU.Status.C);
+		doData (
+			this, inst, info, true,
+			c ? 
+				function (a, b) { return b - a; } :
+				function (a, b) { return b - a - 1; },
+			rsbFlagsFunc
 		);
 	}
 

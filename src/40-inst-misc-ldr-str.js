@@ -21,8 +21,6 @@
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var index;
 		if (inst & I)
@@ -38,6 +36,9 @@
 
 		var address = p ? n + index : n;
 		address >>>= 0;
+
+		if ((address & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (address, info.Rd, cpu.mmu, cpu);
 
@@ -90,6 +91,16 @@
 		);
 	}
 
+	registerMiscAccess (inst_LDRSB, true, 13);
+	function inst_LDRSB (inst, info)
+	{
+		doMiscAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu, cpu) {
+				Rd.set (mmu.read8 (address) << 24 >> 24);
+			}
+		);
+	}
 
 	registerMiscAccess (inst_STRD, false, 15);
 	function inst_STRD (inst, info)

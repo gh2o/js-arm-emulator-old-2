@@ -41,8 +41,6 @@
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
-		if ((n & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		var index;
 		if (inst & NOT_I)
@@ -90,6 +88,9 @@
 
 		var address = p ? n + index : n;
 		address >>>= 0;
+
+		if ((address & (alignment - 1)) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		func (address, info.Rd, cpu.mmu);
 

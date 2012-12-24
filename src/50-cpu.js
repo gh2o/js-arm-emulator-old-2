@@ -75,7 +75,17 @@
 			func.call (this, inst, info);
 		} catch (e) {
 			console.log ("error executing " + Util.hex32 (this.pc._value - 4));
+			this.dumpRegisters ();
 			throw e;
+		}
+	};
+
+	Core.prototype.dumpRegisters = function () {
+		console.log ("registers:");
+		for (var i = 0; i < 18; i++)
+		{
+			var reg = this.getReg (i);
+			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg.get ()));
 		}
 	};
 
