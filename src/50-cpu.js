@@ -1,5 +1,8 @@
 (function () {
 
+	/** @const */ var PSR_I = 1 << 7;
+	/** @const */ var PSR_F = 1 << 6;
+
 	var Core = CPU.Core;
 
 	var instructionTable = Core.instructionTable;
@@ -35,11 +38,55 @@
 	}
 
 	Core.prototype.tick = function () {
+
+		var cpsr = this.cpsr;
+		var creg = this.creg;
+
+		// check for interrupts
+		var vic = this.vic;
+
+		var ils = vic.intLines, ris = vic.regIntSelect;
+		if (cpsr._value & PSR_I) // disable IRQs (where ris == 0)
+			ils &= ris;
+		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
+			ils &= ~ris;
+
+		if (ils != 0)
+		{
+			var fiq = !!(ils & ris);
+
+			// save cpsr
+			var spsr = cpsr._value;
+
+			// save return target
+			var target = this.pc._value;
+
+			// first set cpsr
+			var mask = fiq ? 0xFF : 0xBF;
+			var cval = PSR_I | PSR_F | (fiq ? CPU.Mode.FIQ : CPU.Mode.IRQ);
+			cpsr._value = (cpsr._value & ~mask) | (cval & mask);
+
+			// then return target
+			this.getReg (CPU.Reg.LR).set (target);
+
+			// then SPSR
+			this.getReg (CPU.Reg.SPSR).set (spsr);
+
+			// do jump
+			this.pc.set (
+				(fiq ? 0x1C : 0x18) | 
+					(creg._value & CPU.Control.V ? 0xFFFF0000 : 0)
+			);
+
+			console.log ("interrupt!");
+		}
+
+		// only run after that
 		var inst = this.mmu.read32 (this.pc._value);
 		this.pc._value += 4;
 
 		var cond = inst >>> 28;
-		if (cond < 14 && !evaluateCondition (cond, this.cpsr))
+		if (cond < 14 && !evaluateCondition (cond, cpsr))
 			return;
 
 		var ident = 

@@ -1638,18 +1638,26 @@ var CPU = {};
 	};
 
 	Peripherals.DualTimer = DualTimer;
-	function DualTimer (start)
+	function DualTimer (start, vic, irq)
 	{
 		function Timer () {}
 		Timer.prototype = {
+
 			control: 0,
 			load: 0,
-			value: 0xFFFFFFFF
+			value: 0xFFFFFFFF,
+
+			psc: 0,
+			halted: false
+
 		};
 
 		this.start = start;
 		this.size = 4096;
 		this.timers = [new Timer (), new Timer ()];
+
+		this.vic = vic;
+		this.irq = irq;
 	}
 
 	DualTimer.prototype.write32 = function (offset, data) {
@@ -1660,12 +1668,15 @@ var CPU = {};
 			{
 				case 0x00:
 					timer.load = data;
+					timer.value = data;
+					timer.halted = false;
 					break;
 				case 0x04:
 					timer.value = data;
 					break;
 				case 0x08:
 					timer.control = data & 0xFF;
+					timer.halted = false;
 					break;
 				default:
 					throw "bad timer register " + offset;
@@ -1677,6 +1688,54 @@ var CPU = {};
 		}
 	};
 
+	DualTimer.prototype.update = function () {
+		var timers = this.timers;
+		this._update (timers[0]);
+		this._update (timers[1]);
+	};
+
+	DualTimer.prototype._update = function (timer) {
+
+		/** @const */ var ENABLED = 0x80;
+		/** @const */ var PERIODIC = 0x40;
+		/** @const */ var INTENABLED = 0x20;
+		/** @const */ var BITS32 = 0x02;
+		/** @const */ var ONESHOT = 0x01;
+
+		var cnt = timer.control;
+		var mask = (cnt & BITS32) ? 0xFFFFFFFF : 0xFFFF;
+
+		// return if not enabled or halted
+		if (!(cnt & ENABLED) || timer.halted)
+			return;
+
+		// prescale
+		var psb = (cnt >>> 2) & 0x03;
+		var psm = 1 << (4 * psb);
+		if (++timer.psc >= psm)
+			timer.psc = 0;
+		else
+			return;
+		
+		// check if zero
+		if ((timer.value & mask) == 0)
+		{
+			if (cnt & INTENABLED)
+				this.vic.assert (this.irq);
+
+			if (cnt & ONESHOT)
+				timer.halted = true;
+			else if (cnt & PERIODIC)
+				timer.value = timer.load;
+			else
+				timer.value = 0xFFFFFFFF;
+		}
+		else
+		{
+			timer.value = (timer.value - 1) >>> 0;
+		}
+	};
+
 	// FIXME: VIC protection
 	Peripherals.VIC = VIC;
 	function VIC (start)
@@ -1684,10 +1743,14 @@ var CPU = {};
 		this.start = start;
 		this.size = 65536;
 
+		this.intLines = 0;
+
 		this.regDefVectAddr = 0;
 		this.regVectAddr = 0;
 		this.regIntEnable = 0;
 		this.regSoftEnable = 0;
+		this.regIntSelect = 0;
+
 		this.flagProtection = false;
 
 		this.regsVectCntl = [];
@@ -1723,9 +1786,11 @@ var CPU = {};
 				break;
 			case 0x10:
 				this.regIntEnable |= data;
+				console.log ("=== intenable[1] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x14:
 				this.regIntEnable &= ~data;
+				console.log ("=== intenable[2] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x1C:
 				this.regSoftEnable &= ~data;
@@ -1750,7 +1815,10 @@ var CPU = {};
 				}
 				throw "bad VIC write " + offset + " (" + Util.hex32 (data) + ")";
 		}
-	}
+	};
+
+	VIC.prototype.assert = function (line) { this.intLines |= (1 << line); };
+	VIC.prototype.deassert = function (line) { this.intLines &= ~(1 << line); };
 
 	Peripherals.SIC = SIC;
 	function SIC (start)
@@ -2168,7 +2236,12 @@ var CPU = {};
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
-	StatusRegister.prototype.getMode = function () { return this._value & 0x1F; };
+	StatusRegister.prototype.getMode = function () {
+		return this._value & 0x1F;
+	};
+	StatusRegister.prototype.setMode = function (mode) {
+		this._value = ((this._value & ~0x1F) | (mode & 0x1F)) >>> 0;
+	}
 
 	/**
 	 * @constructor
@@ -2179,7 +2252,7 @@ var CPU = {};
 	/**
 	 * @constructor
 	 */
-	function Core (pmem)
+	function Core (pmem, vic)
 	{
 		var rb = this.regbanks = new Array (32);
 
@@ -2235,6 +2308,9 @@ var CPU = {};
 
 		// memory management
 		this.mmu = new CPU.MMU (this, pmem);
+
+		// interrupt controller
+		this.vic = vic;
 
 		// instruction execution
 		this.info = {
@@ -3558,6 +3634,9 @@ var CPU = {};
 })();
 (function () {
 
+	/** @const */ var PSR_I = 1 << 7;
+	/** @const */ var PSR_F = 1 << 6;
+
 	var Core = CPU.Core;
 
 	var instructionTable = Core.instructionTable;
@@ -3593,11 +3672,55 @@ var CPU = {};
 	}
 
 	Core.prototype.tick = function () {
+
+		var cpsr = this.cpsr;
+		var creg = this.creg;
+
+		// check for interrupts
+		var vic = this.vic;
+
+		var ils = vic.intLines, ris = vic.regIntSelect;
+		if (cpsr._value & PSR_I) // disable IRQs (where ris == 0)
+			ils &= ris;
+		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
+			ils &= ~ris;
+
+		if (ils != 0)
+		{
+			var fiq = !!(ils & ris);
+
+			// save cpsr
+			var spsr = cpsr._value;
+
+			// save return target
+			var target = this.pc._value;
+
+			// first set cpsr
+			var mask = fiq ? 0xFF : 0xBF;
+			var cval = PSR_I | PSR_F | (fiq ? CPU.Mode.FIQ : CPU.Mode.IRQ);
+			cpsr._value = (cpsr._value & ~mask) | (cval & mask);
+
+			// then return target
+			this.getReg (CPU.Reg.LR).set (target);
+
+			// then SPSR
+			this.getReg (CPU.Reg.SPSR).set (spsr);
+
+			// do jump
+			this.pc.set (
+				(fiq ? 0x1C : 0x18) | 
+					(creg._value & CPU.Control.V ? 0xFFFF0000 : 0)
+			);
+
+			console.log ("interrupt!");
+		}
+
+		// only run after that
 		var inst = this.mmu.read32 (this.pc._value);
 		this.pc._value += 4;
 
 		var cond = inst >>> 28;
-		if (cond < 14 && !evaluateCondition (cond, this.cpsr))
+		if (cond < 14 && !evaluateCondition (cond, cpsr))
 			return;
 
 		var ident = 
@@ -3648,6 +3771,42 @@ var CPU = {};
 	};
 
 })();
+var Board = (function () {
+
+	function Board ()
+	{
+		var me = this;
+
+		var pmem = this.pmem = new Mem.PhysicalMemory ();
+
+		var vic = this.vic = new Peripherals.VIC (0x10140000);
+		var sic = this.sic = new Peripherals.SIC (0x10003000);
+		pmem.addDevice (new Mem.RAM (0x0, 0x08000000));
+		pmem.addDevice (vic);
+		pmem.addDevice (sic);
+		pmem.addDevice (new Peripherals.SystemController (0x101e0000));
+		pmem.addDevice (new Peripherals.SystemRegisters (0x10000000,
+			function () { return me.getMilliseconds.apply (null, arguments); }));
+		pmem.addDevice (new Peripherals.UART (0x101f1000,
+			function () { me.uartWrite.apply (null, arguments); }));
+		var timer1 = this.timer1 = new Peripherals.DualTimer (0x101e2000, vic);
+		var timer2 = this.timer2 = new Peripherals.DualTimer (0x101e3000, vic);
+		pmem.addDevice (timer1);
+		pmem.addDevice (timer2);
+
+		var cpu = this.cpu = new CPU.Core (pmem, vic);
+	}
+
+	Board.prototype.tick = function () {
+		var cpu = this.cpu;
+		this.timer1.update ();
+		this.timer2.update ();
+		cpu.tick ();
+	};
+
+	return Board;
+
+})();
 function loadBuffer (mem, addr, buf)
 {
 	for (var off = 0; off < buf.length; off += 4)
@@ -3656,36 +3815,23 @@ function loadBuffer (mem, addr, buf)
 	}
 }
 
-var pmem = new Mem.PhysicalMemory ();
-pmem.addDevice (new Mem.RAM (0x0, 0x08000000));
-pmem.addDevice (new Peripherals.SystemController (0x101e0000));
-pmem.addDevice (new Peripherals.SystemRegisters (0x10000000, function () {
+var board = new Board ();
+
+board.uartWrite = function (data) {
+	process.stdout.write (String.fromCharCode (data));
+};
+board.getMilliseconds = function () {
 	var hrt = process.hrtime ();
 	return (hrt[0] * 1000) + (hrt[1] / 1000000);
-}));
-pmem.addDevice (new Peripherals.UART (0x101f1000, function (data) {
-	process.stdout.write (String.fromCharCode (data));
-}));
-pmem.addDevice (new Peripherals.VIC (0x10140000));
-pmem.addDevice (new Peripherals.SIC (0x10003000));
-pmem.addDevice (new Peripherals.DualTimer (0x101e2000));
-pmem.addDevice (new Peripherals.DualTimer (0x101e3000));
+};
 
-var fs = require('fs');
-loadBuffer (pmem, 0x00008000, fs.readFileSync('./resources/image'));
-loadBuffer (pmem, 0x01000000, fs.readFileSync('./resources/board.dtb'));
+var fs = require ('fs');
+loadBuffer (board.pmem, 0x00008000, fs.readFileSync('./resources/image'));
+loadBuffer (board.pmem, 0x01000000, fs.readFileSync('./resources/board.dtb'));
 
-var cpu = new CPU.Core (pmem);
-cpu.pc.set (0x00008000);
-cpu.getReg (0).set (0);
-cpu.getReg (1).set (0);
-cpu.getReg (2).set (0x01000000);
+board.cpu.pc.set (0x00008000);
+board.cpu.getReg (0).set (0);
+board.cpu.getReg (1).set (0);
+board.cpu.getReg (2).set (0x01000000);
 while (true)
-{
-	var pc = cpu.pc._value;
-	/*
-	if (pc >= 0xc0164304 && pc < 0xc01647b8)
-		console.log (Util.hex32 (pc));
-	*/
-	cpu.tick ();
-}
+	board.tick ();

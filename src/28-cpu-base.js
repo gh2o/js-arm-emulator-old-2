@@ -100,7 +100,12 @@
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
-	StatusRegister.prototype.getMode = function () { return this._value & 0x1F; };
+	StatusRegister.prototype.getMode = function () {
+		return this._value & 0x1F;
+	};
+	StatusRegister.prototype.setMode = function (mode) {
+		this._value = ((this._value & ~0x1F) | (mode & 0x1F)) >>> 0;
+	}
 
 	/**
 	 * @constructor
@@ -111,7 +116,7 @@
 	/**
 	 * @constructor
 	 */
-	function Core (pmem)
+	function Core (pmem, vic)
 	{
 		var rb = this.regbanks = new Array (32);
 
@@ -167,6 +172,9 @@
 
 		// memory management
 		this.mmu = new CPU.MMU (this, pmem);
+
+		// interrupt controller
+		this.vic = vic;
 
 		// instruction execution
 		this.info = {

@@ -79,18 +79,26 @@
 	};
 
 	Peripherals.DualTimer = DualTimer;
-	function DualTimer (start)
+	function DualTimer (start, vic, irq)
 	{
 		function Timer () {}
 		Timer.prototype = {
+
 			control: 0,
 			load: 0,
-			value: 0xFFFFFFFF
+			value: 0xFFFFFFFF,
+
+			psc: 0,
+			halted: false
+
 		};
 
 		this.start = start;
 		this.size = 4096;
 		this.timers = [new Timer (), new Timer ()];
+
+		this.vic = vic;
+		this.irq = irq;
 	}
 
 	DualTimer.prototype.write32 = function (offset, data) {
@@ -101,12 +109,15 @@
 			{
 				case 0x00:
 					timer.load = data;
+					timer.value = data;
+					timer.halted = false;
 					break;
 				case 0x04:
 					timer.value = data;
 					break;
 				case 0x08:
 					timer.control = data & 0xFF;
+					timer.halted = false;
 					break;
 				default:
 					throw "bad timer register " + offset;
@@ -118,6 +129,54 @@
 		}
 	};
 
+	DualTimer.prototype.update = function () {
+		var timers = this.timers;
+		this._update (timers[0]);
+		this._update (timers[1]);
+	};
+
+	DualTimer.prototype._update = function (timer) {
+
+		/** @const */ var ENABLED = 0x80;
+		/** @const */ var PERIODIC = 0x40;
+		/** @const */ var INTENABLED = 0x20;
+		/** @const */ var BITS32 = 0x02;
+		/** @const */ var ONESHOT = 0x01;
+
+		var cnt = timer.control;
+		var mask = (cnt & BITS32) ? 0xFFFFFFFF : 0xFFFF;
+
+		// return if not enabled or halted
+		if (!(cnt & ENABLED) || timer.halted)
+			return;
+
+		// prescale
+		var psb = (cnt >>> 2) & 0x03;
+		var psm = 1 << (4 * psb);
+		if (++timer.psc >= psm)
+			timer.psc = 0;
+		else
+			return;
+		
+		// check if zero
+		if ((timer.value & mask) == 0)
+		{
+			if (cnt & INTENABLED)
+				this.vic.assert (this.irq);
+
+			if (cnt & ONESHOT)
+				timer.halted = true;
+			else if (cnt & PERIODIC)
+				timer.value = timer.load;
+			else
+				timer.value = 0xFFFFFFFF;
+		}
+		else
+		{
+			timer.value = (timer.value - 1) >>> 0;
+		}
+	};
+
 	// FIXME: VIC protection
 	Peripherals.VIC = VIC;
 	function VIC (start)
@@ -125,10 +184,14 @@
 		this.start = start;
 		this.size = 65536;
 
+		this.intLines = 0;
+
 		this.regDefVectAddr = 0;
 		this.regVectAddr = 0;
 		this.regIntEnable = 0;
 		this.regSoftEnable = 0;
+		this.regIntSelect = 0;
+
 		this.flagProtection = false;
 
 		this.regsVectCntl = [];
@@ -164,9 +227,11 @@
 				break;
 			case 0x10:
 				this.regIntEnable |= data;
+				console.log ("=== intenable[1] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x14:
 				this.regIntEnable &= ~data;
+				console.log ("=== intenable[2] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x1C:
 				this.regSoftEnable &= ~data;
@@ -191,7 +256,10 @@
 				}
 				throw "bad VIC write " + offset + " (" + Util.hex32 (data) + ")";
 		}
-	}
+	};
+
+	VIC.prototype.assert = function (line) { this.intLines |= (1 << line); };
+	VIC.prototype.deassert = function (line) { this.intLines &= ~(1 << line); };
 
 	Peripherals.SIC = SIC;
 	function SIC (start)
