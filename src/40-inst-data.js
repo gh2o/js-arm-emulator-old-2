@@ -144,7 +144,7 @@
 		if (write && (inst & S) && (info.Rd.index == 15))
 		{
 			var spsr = cpu.getReg (CPU.Reg.SPSR);
-			if (cpu.getReg (CPU.Reg.SPSR))
+			if (spsr)
 				cpu.cpsr._value = spsr._value;
 			else
 				throw "attempted to set CPSR to SPSR when no SPSR exists";

@@ -55,14 +55,7 @@
 		R: 1 << 9,
 		V: 1 << 13
 	};
-
-	(function () {
-		var all = 0;
-		for (var x in Control)
-			if (Control.hasOwnProperty (x))
-				all |= Control[x];
-		Control.ALL = all;
-	})();
+	Util.enumAll (Control);
 
 	CPU.Control = Control;
 

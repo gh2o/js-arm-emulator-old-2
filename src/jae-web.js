@@ -2,6 +2,8 @@ var resourcesList = ["image", "board.dtb"];
 var resources = {};
 resourcesList.forEach (loadResource);
 
+var board = null;
+
 function loadResource (rsrc)
 {
 	var xhr = new XMLHttpRequest ();
@@ -51,7 +53,7 @@ function start ()
 			mem.write32 (addr + off, swap (view[off >> 2]));
 	}
 
-	var board = new Board ();
+	board = new Board ();
 
 	var uartCount = 0;
 	board.uartWrite = function (code) {
@@ -62,9 +64,10 @@ function start ()
 			output.normalize ();
 	};
 
-	board.getMilliseconds = function () {
-		return performance.webkitNow ();
-	};
+	board.getMilliseconds = 
+		performance.now ? function () { return performance.now (); } :
+		performance.webkitNow ? function () { return performance.webkitNow (); } :
+		function () { return (new Date).getTime (); };
 
 	load (board.pmem, 0x00008000, resources['image']);
 	load (board.pmem, 0x01000000, resources['board.dtb']);
@@ -77,11 +80,11 @@ function start ()
 	var iid = setInterval (function () {
 		var start = (new Date).getTime ();
 		try {
-			while ((new Date).getTime () - start <= 10)
+			while ((new Date).getTime () - start <= 20)
 				board.tick ();
 		} catch (e) {
 			clearInterval (iid);
 			throw e;
 		}
-	}, 10);
+	}, 5);
 }

@@ -37,10 +37,31 @@
 		}
 	}
 
-	Core.prototype.tick = function () {
+	Core.prototype.enterException = function (mode, vect, target, nofiq) {
 
 		var cpsr = this.cpsr;
 		var creg = this.creg;
+
+		// save cpsr
+		var spsr = cpsr._value;
+
+		// set cpsr (FIXME: thumb?)
+		cpsr._value = (cpsr._value & ~0x1F) | (mode & 0x1F); // set mode
+		cpsr._value |= PSR_I | (nofiq ? PSR_F : 0); // disable interrupts
+
+		// then return target (+4)
+		this.getReg (CPU.Reg.LR).set (target + 4);
+
+		// then SPSR
+		this.getReg (CPU.Reg.SPSR).set (spsr);
+
+		// do jump
+		this.pc.set (vect | (creg._value & CPU.Control.V ? 0xFFFF0000 : 0));
+	};
+
+	Core.prototype.tick = function () {
+
+		var cpsr = this.cpsr;
 
 		// check for interrupts
 		var vic = this.vic;
@@ -51,6 +72,7 @@
 		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
 			ils &= ~ris;
 
+		/*
 		if (ils != 0)
 		{
 			var fiq = !!(ils & ris);
@@ -66,8 +88,8 @@
 			var cval = PSR_I | PSR_F | (fiq ? CPU.Mode.FIQ : CPU.Mode.IRQ);
 			cpsr._value = (cpsr._value & ~mask) | (cval & mask);
 
-			// then return target
-			this.getReg (CPU.Reg.LR).set (target);
+			// then return target (+4)
+			this.getReg (CPU.Reg.LR).set (target + 4);
 
 			// then SPSR
 			this.getReg (CPU.Reg.SPSR).set (spsr);
@@ -77,8 +99,16 @@
 				(fiq ? 0x1C : 0x18) | 
 					(creg._value & CPU.Control.V ? 0xFFFF0000 : 0)
 			);
+		}
+		*/
 
-			console.log ("interrupt!");
+		if (ils != 0)
+		{
+			var fiq = !!(ils & ris);
+			if (fiq)
+				this.enterException (CPU.Mode.FIQ, 0x1C, this.pc._value, true);
+			else
+				this.enterException (CPU.Mode.IRQ, 0x18, this.pc._value, false);
 		}
 
 		// only run after that
@@ -132,7 +162,7 @@
 		for (var i = 0; i < 18; i++)
 		{
 			var reg = this.getReg (i);
-			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg.get ()));
+			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg._value));
 		}
 	};
 

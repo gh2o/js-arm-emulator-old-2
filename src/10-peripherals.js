@@ -1,25 +1,104 @@
 (function () {
 
+	function Base () {}
+	goog.mixin (Base.prototype, {
+		read8: function (offset) {
+			if (offset & 0x03)
+				throw "unaligned 8-bit read from peripheral";
+			else
+				return this.read32 (offset) & 0xFF;
+		},
+		write8: function (offset, data) {
+			if (offset & 0x03)
+				throw "unaligned 8-bit write to peripheral";
+			else
+				this.write32 (offset, data & 0xFF);
+		},
+		read16: function (offset) {
+			if (offset & 0x03)
+				throw "unaligned 16-bit read from peripheral";
+			else
+				return this.read32 (offset) & 0xFFFF;
+		},
+		write16: function (offset, data) {
+			if (offset & 0x03)
+				throw "unaligned 16-bit write to peripheral";
+			else
+				this.write32 (offset, data & 0xFFFF);
+		}
+	});
+
+	/**
+	 * @enum {number}
+	 */
+	UART.Control = {
+		RXE: 1 << 9,
+		TXE: 1 << 8,
+		UARTEN: 1 << 0
+	};
+	Util.enumAll (UART.Control);
+
 	Peripherals.UART = UART;
+	goog.inherits (UART, Base);
 	function UART (start, callback)
 	{
 		this.start = start;
 		this.size = 4096;
 		this.callback = callback || (function () {});
+
+		this.regControl = UART.Control.RXE | UART.Control.TXE | UART.Control.UARTEN;
+		this.regIntMask = 0;
+		this.regIntStatus = 0;
 	}
 
 	UART.prototype.read32 = function (offset) {
-		if (offset == 0x18)
-			return 0x40;
-		else
-			throw "bad UART register " + offset;
+		switch (offset)
+		{
+			case 0x18:
+				return 0x40;
+			case 0x30:
+				return this.regControl;
+			case 0xFE0:
+				return 0x11;
+			case 0xFE4:
+				return 0x10;
+			case 0xFE8:
+				return 0x14;
+			case 0xFEC:
+				return 0x00;
+			case 0xFF0:
+				return 0x0D;
+			case 0xFF4:
+				return 0xF0;
+			case 0xFF8:
+				return 0x05;
+			case 0xFFC:
+				return 0xB1;
+			default:
+				throw new Error ("bad UART read from 0x" + offset.toString (16));
+		}
 	};
 
-	UART.prototype.write8 = function (offset, data) {
-		if (offset == 0)
-			this.callback (data);
-		else
-			throw "bad UART register " + offset;
+	UART.prototype.write32 = function (offset, data) {
+		switch (offset)
+		{
+			case 0x00:
+				this.callback (data & 0xFF);
+				break;
+			case 0x30:
+				if (data & ~UART.Control.ALL)
+					throw "unsupported UART control: 0x" + data.toString (16);
+				this.regControl = data;
+				break;
+			case 0x38:
+				this.regIntMask = data & 0x7FF;
+				break;
+			case 0x44:
+				this.regIntStatus &= ~data;
+				break;
+			default:
+				throw new Error ("bad UART write to 0x" + offset.toString (16));
+		}
 	};
 
 	Peripherals.SystemRegisters = SystemRegisters;
@@ -101,10 +180,30 @@
 		this.irq = irq;
 	}
 
+	DualTimer.prototype.read32 = function (offset) {
+		if (offset < 0x40)
+		{
+			var timer = this.timers[offset >>> 5];
+			switch (offset & 0x1F)
+			{
+				case 0x04:
+					return timer.value;
+				case 0x08:
+					return timer.control;
+				default:
+					throw "bad timer read 0x" + offset.toString (16);
+			}
+		}
+		else
+		{
+			throw "bad timer read 0x" + offset.toString (16);
+		}
+	};
+
 	DualTimer.prototype.write32 = function (offset, data) {
 		if (offset < 0x40)
 		{
-			timer = this.timers[offset >>> 5];
+			var timer = this.timers[offset >>> 5];
 			switch (offset & 0x1f)
 			{
 				case 0x00:
@@ -119,13 +218,16 @@
 					timer.control = data & 0xFF;
 					timer.halted = false;
 					break;
+				case 0x0C:
+					this.vic.deassert (this.irq);
+					break;
 				default:
-					throw "bad timer register " + offset;
+					throw "bad timer write 0x" + offset.toString (16);
 			}
 		}
 		else
 		{
-			throw "bad timer register " + offset;
+			throw "bad timer write 0x" + offset.toString (16);
 		}
 	};
 
@@ -202,6 +304,8 @@
 	VIC.prototype.read32 = function (offset) {
 		switch (offset)
 		{
+			case 0x00:
+				return this.intLines & this.regIntEnable & ~this.regIntSelect;
 			case 0x30:
 				console.log (">>> FIXME: read from vectaddr");
 				return this.regVectAddr;
@@ -227,11 +331,9 @@
 				break;
 			case 0x10:
 				this.regIntEnable |= data;
-				console.log ("=== intenable[1] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x14:
 				this.regIntEnable &= ~data;
-				console.log ("=== intenable[2] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x1C:
 				this.regSoftEnable &= ~data;

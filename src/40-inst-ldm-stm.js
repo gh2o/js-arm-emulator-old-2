@@ -17,6 +17,8 @@
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
+		if ((n & 0x03) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		var pu = (inst >>> 23) & 0x03;
 		switch (pu)
@@ -41,9 +43,6 @@
 
 		start_address = (start_address & ~0x03) >>> 0;
 		end_address = (end_address & ~0x03) >>> 0;
-
-		if ((start_address & 0x03) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 
@@ -83,6 +82,48 @@
 				
 				if (end_address != address - 4)
 					throw "LDM(1) memory assertion error";
+			}
+		);
+	}
+
+	Core.registerInstruction (inst_LDM_3, [0x85, 0x87, 0x8D, 0x8F, 0x95, 0x97, 0x9D, 0x9F],
+		-1, false);
+	function inst_LDM_3 (inst, info)
+	{
+		doMultiple (
+			this, inst, info,
+			function (start_address, end_address, register_list, bank, mmu)
+			{
+				var address = start_address;
+				for (var i = 0; i <= 14; i++)
+				{
+					if (register_list & (1 << i))
+					{
+						bank[i].set (mmu.read32 (address));
+						address += 4;
+					}
+				}
+
+				var cpsr = bank[CPU.Reg.CPSR];
+				var spsr = bank[CPU.Reg.SPSR];
+				if (spsr)
+					cpsr._value = spsr._value;
+				else
+					throw "LDM(3) without SPSR";
+
+				if (register_list & (1 << 15))
+				{
+					// FIXME: thumb?
+					bank[CPU.Reg.PC].set (mmu.read32 (address) & ~0x3);
+					address += 4;
+				}
+				else
+				{
+					throw "LDM(3) without PC";
+				}
+
+				if (end_address != address - 4)
+					throw "LDM(3) memory assertion error";
 			}
 		);
 	}

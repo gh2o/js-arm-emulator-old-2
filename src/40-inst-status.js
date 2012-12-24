@@ -5,15 +5,24 @@
 	Core.registerInstruction (inst_MRS_CPSR, 0x10, 0, false);
 	function inst_MRS_CPSR (inst, info) { info.Rd.set (this.cpsr.get ()); }
 
+	Core.registerInstruction (inst_MRS_SPSR, 0x14, 0, false);
+	function inst_MRS_SPSR (inst, info)
+	{	
+		var spsr = this.getReg (CPU.Reg.SPSR);
+		if (!spsr)
+			throw "attempted to read non-existent SPSR";
+		info.Rd.set (spsr.get ());
+	}
+
 	Core.registerInstruction (inst_MSR, [0x32, 0x36], -1, false);
 	Core.registerInstruction (inst_MSR, [0x12, 0x16], 0, false);
 	function inst_MSR (inst, info)
 	{
-		// masks for armv5
-		/** @const */ var UnallocMask = 0x0FFFFF00;
+		// masks for armv4
+		/** @const */ var UnallocMask = 0x0FFFFF20;
 		/** @const */ var UserMask = 0xF0000000;
-		/** @const */ var PrivMask = 0x0000000F;
-		/** @const */ var StateMask = 0x00000020;
+		/** @const */ var PrivMask = 0x000000DF;
+		/** @const */ var StateMask = 0x00000000;
 
 		/** @const */ var I = 1 << 25;
 		/** @const */ var R = 1 << 22;
@@ -36,10 +45,10 @@
 			throw "attempted to set reserved PSR bits";
 
 		var byte_mask =
-			(inst & 16 ? 0x000000FF : 0) |
-			(inst & 17 ? 0x0000FF00 : 0) |
-			(inst & 18 ? 0x00FF0000 : 0) |
-			(inst & 19 ? 0xFF000000 : 0);
+			(inst & (1 << 16) ? 0x000000FF : 0) |
+			(inst & (1 << 17) ? 0x0000FF00 : 0) |
+			(inst & (1 << 18) ? 0x00FF0000 : 0) |
+			(inst & (1 << 19) ? 0xFF000000 : 0);
 		var mask;
 
 		if (inst & R)

@@ -157,6 +157,31 @@
 		);
 	}
 
+	registerAccess (inst_LDRT, true, false, true);
+	function inst_LDRT (inst, info)
+	{
+		doAccess (
+			this, inst, info, 4,
+			function (address, Rd, mmu) {
+				// FIXME: assumed that U==0
+				var data = mmu.read32 (address & ~0x03, true);
+				data = Util.rotRight (data, 8 * (address & 0x03));
+				Rd.set (data); // unpredictable if Rd is PC
+			}
+		);
+	}
+
+	registerAccess (inst_LDRBT, true, true, true);
+	function inst_LDRBT (inst, info)
+	{
+		doAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu) {
+				Rd.set (mmu.read8 (address, true));
+			}
+		);
+	}
+
 	Core.registerInstruction (inst_PLD, [0x55, 0x5D], -1, true);
 	Core.registerInstruction (inst_PLD, [0x75, 0x7D], [0, 2, 4, 6, 8, 10, 12, 14], true);
 	function inst_PLD (inst, info)

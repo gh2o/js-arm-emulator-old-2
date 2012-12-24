@@ -16,8 +16,8 @@ var Board = (function () {
 			function () { return me.getMilliseconds.apply (null, arguments); }));
 		pmem.addDevice (new Peripherals.UART (0x101f1000,
 			function () { me.uartWrite.apply (null, arguments); }));
-		var timer1 = this.timer1 = new Peripherals.DualTimer (0x101e2000, vic);
-		var timer2 = this.timer2 = new Peripherals.DualTimer (0x101e3000, vic);
+		var timer1 = this.timer1 = new Peripherals.DualTimer (0x101e2000, vic, 4);
+		var timer2 = this.timer2 = new Peripherals.DualTimer (0x101e3000, vic, 5);
 		pmem.addDevice (timer1);
 		pmem.addDevice (timer2);
 

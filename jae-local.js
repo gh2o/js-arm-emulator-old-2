@@ -1539,6 +1539,7 @@ var Peripherals = {};
 var CPU = {};
 (function () {
 
+	Util.hex32 = hex32;
 	function hex32 (x)
 	{
 		var ret = x.toString (16);
@@ -1547,38 +1548,124 @@ var CPU = {};
 		return ret;
 	}
 
-	Util.hex32 = hex32;
-
+	Util.rotRight = rotRight;
 	function rotRight (val, sht)
 	{
 		return ((val >>> sht) | (val << (32 - sht))) >>> 0;
 	}
 
-	Util.rotRight = rotRight;
+	Util.enumAll = enumAll;
+	function enumAll (obj)
+	{
+		var all = 0;
+		for (var x in obj)
+			if (obj.hasOwnProperty (x))
+				all |= obj[x];
+		obj.ALL = all;
+	}
 
 })();
 (function () {
 
+	function Base () {}
+	goog.mixin (Base.prototype, {
+		read8: function (offset) {
+			if (offset & 0x03)
+				throw "unaligned 8-bit read from peripheral";
+			else
+				return this.read32 (offset) & 0xFF;
+		},
+		write8: function (offset, data) {
+			if (offset & 0x03)
+				throw "unaligned 8-bit write to peripheral";
+			else
+				this.write32 (offset, data & 0xFF);
+		},
+		read16: function (offset) {
+			if (offset & 0x03)
+				throw "unaligned 16-bit read from peripheral";
+			else
+				return this.read32 (offset) & 0xFFFF;
+		},
+		write16: function (offset, data) {
+			if (offset & 0x03)
+				throw "unaligned 16-bit write to peripheral";
+			else
+				this.write32 (offset, data & 0xFFFF);
+		}
+	});
+
+	/**
+	 * @enum {number}
+	 */
+	UART.Control = {
+		RXE: 1 << 9,
+		TXE: 1 << 8,
+		UARTEN: 1 << 0
+	};
+	Util.enumAll (UART.Control);
+
 	Peripherals.UART = UART;
+	goog.inherits (UART, Base);
 	function UART (start, callback)
 	{
 		this.start = start;
 		this.size = 4096;
 		this.callback = callback || (function () {});
+
+		this.regControl = UART.Control.RXE | UART.Control.TXE | UART.Control.UARTEN;
+		this.regIntMask = 0;
+		this.regIntStatus = 0;
 	}
 
 	UART.prototype.read32 = function (offset) {
-		if (offset == 0x18)
-			return 0x40;
-		else
-			throw "bad UART register " + offset;
+		switch (offset)
+		{
+			case 0x18:
+				return 0x40;
+			case 0x30:
+				return this.regControl;
+			case 0xFE0:
+				return 0x11;
+			case 0xFE4:
+				return 0x10;
+			case 0xFE8:
+				return 0x14;
+			case 0xFEC:
+				return 0x00;
+			case 0xFF0:
+				return 0x0D;
+			case 0xFF4:
+				return 0xF0;
+			case 0xFF8:
+				return 0x05;
+			case 0xFFC:
+				return 0xB1;
+			default:
+				throw new Error ("bad UART read from 0x" + offset.toString (16));
+		}
 	};
 
-	UART.prototype.write8 = function (offset, data) {
-		if (offset == 0)
-			this.callback (data);
-		else
-			throw "bad UART register " + offset;
+	UART.prototype.write32 = function (offset, data) {
+		switch (offset)
+		{
+			case 0x00:
+				this.callback (data & 0xFF);
+				break;
+			case 0x30:
+				if (data & ~UART.Control.ALL)
+					throw "unsupported UART control: 0x" + data.toString (16);
+				this.regControl = data;
+				break;
+			case 0x38:
+				this.regIntMask = data & 0x7FF;
+				break;
+			case 0x44:
+				this.regIntStatus &= ~data;
+				break;
+			default:
+				throw new Error ("bad UART write to 0x" + offset.toString (16));
+		}
 	};
 
 	Peripherals.SystemRegisters = SystemRegisters;
@@ -1660,10 +1747,30 @@ var CPU = {};
 		this.irq = irq;
 	}
 
+	DualTimer.prototype.read32 = function (offset) {
+		if (offset < 0x40)
+		{
+			var timer = this.timers[offset >>> 5];
+			switch (offset & 0x1F)
+			{
+				case 0x04:
+					return timer.value;
+				case 0x08:
+					return timer.control;
+				default:
+					throw "bad timer read 0x" + offset.toString (16);
+			}
+		}
+		else
+		{
+			throw "bad timer read 0x" + offset.toString (16);
+		}
+	};
+
 	DualTimer.prototype.write32 = function (offset, data) {
 		if (offset < 0x40)
 		{
-			timer = this.timers[offset >>> 5];
+			var timer = this.timers[offset >>> 5];
 			switch (offset & 0x1f)
 			{
 				case 0x00:
@@ -1678,13 +1785,16 @@ var CPU = {};
 					timer.control = data & 0xFF;
 					timer.halted = false;
 					break;
+				case 0x0C:
+					this.vic.deassert (this.irq);
+					break;
 				default:
-					throw "bad timer register " + offset;
+					throw "bad timer write 0x" + offset.toString (16);
 			}
 		}
 		else
 		{
-			throw "bad timer register " + offset;
+			throw "bad timer write 0x" + offset.toString (16);
 		}
 	};
 
@@ -1761,6 +1871,8 @@ var CPU = {};
 	VIC.prototype.read32 = function (offset) {
 		switch (offset)
 		{
+			case 0x00:
+				return this.intLines & this.regIntEnable & ~this.regIntSelect;
 			case 0x30:
 				console.log (">>> FIXME: read from vectaddr");
 				return this.regVectAddr;
@@ -1786,11 +1898,9 @@ var CPU = {};
 				break;
 			case 0x10:
 				this.regIntEnable |= data;
-				console.log ("=== intenable[1] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x14:
 				this.regIntEnable &= ~data;
-				console.log ("=== intenable[2] now " + Util.hex32 (this.regIntEnable >>> 0));
 				break;
 			case 0x1C:
 				this.regSoftEnable &= ~data;
@@ -2191,14 +2301,7 @@ var CPU = {};
 		R: 1 << 9,
 		V: 1 << 13
 	};
-
-	(function () {
-		var all = 0;
-		for (var x in Control)
-			if (Control.hasOwnProperty (x))
-				all |= Control[x];
-		Control.ALL = all;
-	})();
+	Util.enumAll (Control);
 
 	CPU.Control = Control;
 
@@ -2773,7 +2876,7 @@ var CPU = {};
 		if (write && (inst & S) && (info.Rd.index == 15))
 		{
 			var spsr = cpu.getReg (CPU.Reg.SPSR);
-			if (cpu.getReg (CPU.Reg.SPSR))
+			if (spsr)
 				cpu.cpsr._value = spsr._value;
 			else
 				throw "attempted to set CPSR to SPSR when no SPSR exists";
@@ -3018,6 +3121,8 @@ var CPU = {};
 
 		var Rn = info.Rn;
 		var n = Rn.get ();
+		if ((n & 0x03) && (cpu.creg._value & CPU.Control.A))
+			throw "access alignment fault";
 
 		var pu = (inst >>> 23) & 0x03;
 		switch (pu)
@@ -3042,9 +3147,6 @@ var CPU = {};
 
 		start_address = (start_address & ~0x03) >>> 0;
 		end_address = (end_address & ~0x03) >>> 0;
-
-		if ((start_address & 0x03) && (cpu.creg._value & CPU.Control.A))
-			throw "access alignment fault";
 
 		func (start_address, end_address, inst & 0xFFFF, cpu.getRegBank (), cpu.mmu);
 
@@ -3084,6 +3186,48 @@ var CPU = {};
 				
 				if (end_address != address - 4)
 					throw "LDM(1) memory assertion error";
+			}
+		);
+	}
+
+	Core.registerInstruction (inst_LDM_3, [0x85, 0x87, 0x8D, 0x8F, 0x95, 0x97, 0x9D, 0x9F],
+		-1, false);
+	function inst_LDM_3 (inst, info)
+	{
+		doMultiple (
+			this, inst, info,
+			function (start_address, end_address, register_list, bank, mmu)
+			{
+				var address = start_address;
+				for (var i = 0; i <= 14; i++)
+				{
+					if (register_list & (1 << i))
+					{
+						bank[i].set (mmu.read32 (address));
+						address += 4;
+					}
+				}
+
+				var cpsr = bank[CPU.Reg.CPSR];
+				var spsr = bank[CPU.Reg.SPSR];
+				if (spsr)
+					cpsr._value = spsr._value;
+				else
+					throw "LDM(3) without SPSR";
+
+				if (register_list & (1 << 15))
+				{
+					// FIXME: thumb?
+					bank[CPU.Reg.PC].set (mmu.read32 (address) & ~0x3);
+					address += 4;
+				}
+				else
+				{
+					throw "LDM(3) without PC";
+				}
+
+				if (end_address != address - 4)
+					throw "LDM(3) memory assertion error";
 			}
 		);
 	}
@@ -3268,6 +3412,31 @@ var CPU = {};
 			this, inst, info, 1,
 			function (address, Rd, mmu) {
 				mmu.write8 (address, Rd.get () & 0xFF);
+			}
+		);
+	}
+
+	registerAccess (inst_LDRT, true, false, true);
+	function inst_LDRT (inst, info)
+	{
+		doAccess (
+			this, inst, info, 4,
+			function (address, Rd, mmu) {
+				// FIXME: assumed that U==0
+				var data = mmu.read32 (address & ~0x03, true);
+				data = Util.rotRight (data, 8 * (address & 0x03));
+				Rd.set (data); // unpredictable if Rd is PC
+			}
+		);
+	}
+
+	registerAccess (inst_LDRBT, true, true, true);
+	function inst_LDRBT (inst, info)
+	{
+		doAccess (
+			this, inst, info, 1,
+			function (address, Rd, mmu) {
+				Rd.set (mmu.read8 (address, true));
 			}
 		);
 	}
@@ -3570,15 +3739,24 @@ var CPU = {};
 	Core.registerInstruction (inst_MRS_CPSR, 0x10, 0, false);
 	function inst_MRS_CPSR (inst, info) { info.Rd.set (this.cpsr.get ()); }
 
+	Core.registerInstruction (inst_MRS_SPSR, 0x14, 0, false);
+	function inst_MRS_SPSR (inst, info)
+	{	
+		var spsr = this.getReg (CPU.Reg.SPSR);
+		if (!spsr)
+			throw "attempted to read non-existent SPSR";
+		info.Rd.set (spsr.get ());
+	}
+
 	Core.registerInstruction (inst_MSR, [0x32, 0x36], -1, false);
 	Core.registerInstruction (inst_MSR, [0x12, 0x16], 0, false);
 	function inst_MSR (inst, info)
 	{
-		// masks for armv5
-		/** @const */ var UnallocMask = 0x0FFFFF00;
+		// masks for armv4
+		/** @const */ var UnallocMask = 0x0FFFFF20;
 		/** @const */ var UserMask = 0xF0000000;
-		/** @const */ var PrivMask = 0x0000000F;
-		/** @const */ var StateMask = 0x00000020;
+		/** @const */ var PrivMask = 0x000000DF;
+		/** @const */ var StateMask = 0x00000000;
 
 		/** @const */ var I = 1 << 25;
 		/** @const */ var R = 1 << 22;
@@ -3601,10 +3779,10 @@ var CPU = {};
 			throw "attempted to set reserved PSR bits";
 
 		var byte_mask =
-			(inst & 16 ? 0x000000FF : 0) |
-			(inst & 17 ? 0x0000FF00 : 0) |
-			(inst & 18 ? 0x00FF0000 : 0) |
-			(inst & 19 ? 0xFF000000 : 0);
+			(inst & (1 << 16) ? 0x000000FF : 0) |
+			(inst & (1 << 17) ? 0x0000FF00 : 0) |
+			(inst & (1 << 18) ? 0x00FF0000 : 0) |
+			(inst & (1 << 19) ? 0xFF000000 : 0);
 		var mask;
 
 		if (inst & R)
@@ -3671,6 +3849,28 @@ var CPU = {};
 		}
 	}
 
+	Core.prototype.enterException = function (mode, vect, target, nofiq) {
+
+		var cpsr = this.cpsr;
+		var creg = this.creg;
+
+		// save cpsr
+		var spsr = cpsr._value;
+
+		// set cpsr (FIXME: thumb?)
+		cpsr._value = (cpsr._value & ~0x1F) | (mode & 0x1F); // set mode
+		cpsr._value |= PSR_I | (nofiq ? PSR_F : 0); // disable interrupts
+
+		// then return target (+4)
+		this.getReg (CPU.Reg.LR).set (target + 4);
+
+		// then SPSR
+		this.getReg (CPU.Reg.SPSR).set (spsr);
+
+		// do jump
+		this.pc.set (vect | (creg._value & CPU.Control.V ? 0xFFFF0000 : 0));
+	};
+
 	Core.prototype.tick = function () {
 
 		var cpsr = this.cpsr;
@@ -3685,6 +3885,7 @@ var CPU = {};
 		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
 			ils &= ~ris;
 
+		/*
 		if (ils != 0)
 		{
 			var fiq = !!(ils & ris);
@@ -3700,8 +3901,8 @@ var CPU = {};
 			var cval = PSR_I | PSR_F | (fiq ? CPU.Mode.FIQ : CPU.Mode.IRQ);
 			cpsr._value = (cpsr._value & ~mask) | (cval & mask);
 
-			// then return target
-			this.getReg (CPU.Reg.LR).set (target);
+			// then return target (+4)
+			this.getReg (CPU.Reg.LR).set (target + 4);
 
 			// then SPSR
 			this.getReg (CPU.Reg.SPSR).set (spsr);
@@ -3711,8 +3912,16 @@ var CPU = {};
 				(fiq ? 0x1C : 0x18) | 
 					(creg._value & CPU.Control.V ? 0xFFFF0000 : 0)
 			);
+		}
+		*/
 
-			console.log ("interrupt!");
+		if (ils != 0)
+		{
+			var fiq = !!(ils & ris);
+			if (fiq)
+				this.enterException (CPU.Mode.FIQ, 0x1C, this.pc._value, true);
+			else
+				this.enterException (CPU.Mode.IRQ, 0x18, this.pc._value, false);
 		}
 
 		// only run after that
@@ -3766,7 +3975,7 @@ var CPU = {};
 		for (var i = 0; i < 18; i++)
 		{
 			var reg = this.getReg (i);
-			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg.get ()));
+			console.log ("  " + reg.bank + "\t" + i + " = " + Util.hex32 (reg._value));
 		}
 	};
 
@@ -3789,13 +3998,21 @@ var Board = (function () {
 			function () { return me.getMilliseconds.apply (null, arguments); }));
 		pmem.addDevice (new Peripherals.UART (0x101f1000,
 			function () { me.uartWrite.apply (null, arguments); }));
-		var timer1 = this.timer1 = new Peripherals.DualTimer (0x101e2000, vic);
-		var timer2 = this.timer2 = new Peripherals.DualTimer (0x101e3000, vic);
+		var timer1 = this.timer1 = new Peripherals.DualTimer (0x101e2000, vic, 4);
+		var timer2 = this.timer2 = new Peripherals.DualTimer (0x101e3000, vic, 5);
 		pmem.addDevice (timer1);
 		pmem.addDevice (timer2);
 
 		var cpu = this.cpu = new CPU.Core (pmem, vic);
 	}
+
+	Board.prototype.uartWrite = function () {
+		throw new Error ("uartWrite not implemented");
+	};
+
+	Board.prototype.getMilliseconds = function () {
+		throw new Error ("getMilliseconds not implemented");
+	};
 
 	Board.prototype.tick = function () {
 		var cpu = this.cpu;
@@ -3807,7 +4024,7 @@ var Board = (function () {
 	return Board;
 
 })();
-function loadBuffer (mem, addr, buf)
+function load (mem, addr, buf)
 {
 	for (var off = 0; off < buf.length; off += 4)
 	{
@@ -3826,12 +4043,49 @@ board.getMilliseconds = function () {
 };
 
 var fs = require ('fs');
-loadBuffer (board.pmem, 0x00008000, fs.readFileSync('./resources/image'));
-loadBuffer (board.pmem, 0x01000000, fs.readFileSync('./resources/board.dtb'));
+load (board.pmem, 0x00008000, fs.readFileSync('./resources/image'));
+load (board.pmem, 0x01000000, fs.readFileSync('./resources/board.dtb'));
 
 board.cpu.pc.set (0x00008000);
 board.cpu.getReg (0).set (0);
 board.cpu.getReg (1).set (0);
 board.cpu.getReg (2).set (0x01000000);
+
 while (true)
 	board.tick ();
+
+/*
+var sc = 0;
+try {
+	while (true)
+	{
+		var rg = sc > 9585000;
+		if (rg) console.log ("executing " + Util.hex32 (board.cpu.pc._value));
+		board.tick ();
+		if (rg) board.cpu.dumpRegisters ();
+		sc++;
+	}
+} catch (e) {
+	console.log ('!!! instruction count: ' + sc);
+	throw e;
+}
+*/
+
+/*
+var pcs = new Array (2000);
+var pcsi = 0;
+
+try {
+	while (true)
+	{
+		pcs[pcsi] = [board.cpu.pc._value];
+		pcsi = (pcsi + 1) % 2000;
+		board.tick ();
+	}
+} catch (e) {
+	pcs.slice (pcsi).concat (pcs.slice (0, pcsi)).forEach (function (x) {
+		console.log (Util.hex32 (x));
+	});
+	throw e;
+}
+*/
