@@ -72,36 +72,6 @@
 		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
 			ils &= ~ris;
 
-		/*
-		if (ils != 0)
-		{
-			var fiq = !!(ils & ris);
-
-			// save cpsr
-			var spsr = cpsr._value;
-
-			// save return target
-			var target = this.pc._value;
-
-			// first set cpsr
-			var mask = fiq ? 0xFF : 0xBF;
-			var cval = PSR_I | PSR_F | (fiq ? CPU.Mode.FIQ : CPU.Mode.IRQ);
-			cpsr._value = (cpsr._value & ~mask) | (cval & mask);
-
-			// then return target (+4)
-			this.getReg (CPU.Reg.LR).set (target + 4);
-
-			// then SPSR
-			this.getReg (CPU.Reg.SPSR).set (spsr);
-
-			// do jump
-			this.pc.set (
-				(fiq ? 0x1C : 0x18) | 
-					(creg._value & CPU.Control.V ? 0xFFFF0000 : 0)
-			);
-		}
-		*/
-
 		if (ils != 0)
 		{
 			var fiq = !!(ils & ris);
