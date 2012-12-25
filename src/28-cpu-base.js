@@ -80,6 +80,7 @@
 	 * @param {string} bank
 	 * @param {number} index
 	 * @param {number} value
+	 * @extends Register
 	 */
 	function ProgramCounter (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (ProgramCounter, Register);
@@ -90,6 +91,7 @@
 	 * @param {string} bank
 	 * @param {number} index
 	 * @param {number} value
+	 * @extends Register
 	 */
 	function StatusRegister (bank, index, value) { goog.base (this, bank, index, value); }
 	goog.inherits (StatusRegister, Register);
@@ -102,6 +104,7 @@
 
 	/**
 	 * @constructor
+	 * @extends Register
 	 */
 	function ControlRegister () { goog.base (this, "cp", -1, 0); }
 	goog.inherits (ControlRegister, Register);

@@ -171,6 +171,18 @@
 		);
 	}
 
+	registerAccess (inst_STRT, false, false, true);
+	function inst_STRT (inst, info)
+	{
+		doAccess (
+			this, inst, info, 4,
+			function (address, Rd, mmu) {
+				// FIXME: armv5 specific
+				mmu.write32 (address & ~0x03, Rd.get (), true);
+			}
+		);
+	}
+
 	registerAccess (inst_LDRBT, true, true, true);
 	function inst_LDRBT (inst, info)
 	{

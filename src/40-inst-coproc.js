@@ -26,6 +26,20 @@
 					return cpu.creg._value;
 				}
 			}
+			else if (n == 5)
+			{
+				if (o2 == 0)
+				{
+					return cpu.mmu.regFaultStatus;
+				}
+			}
+			else if (n == 6)
+			{
+				if (o2 == 0)
+				{
+					return cpu.mmu.regFaultAddress;
+				}
+			}
 			else if (n == 7)
 			{
 				if (m == 14 && o2 == 3)

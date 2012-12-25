@@ -9,6 +9,8 @@
 
 	chosen {
 		bootargs = "earlyprintk debug cachepolicy=uncached console=ttyAMA0";
+		linux,initrd-start = <0x01200000>;
+		linux,initrd-end   = <0x02200000>;
 	};
 
 	aliases {

@@ -66,19 +66,19 @@
 		// check for interrupts
 		var vic = this.vic;
 
-		var ils = vic.intLines, ris = vic.regIntSelect;
-		if (cpsr._value & PSR_I) // disable IRQs (where ris == 0)
-			ils &= ris;
-		if (cpsr._value & PSR_F) // disable FIQs (where ris == 1)
-			ils &= ~ris;
+		var iss = (vic.intLines | vic.regSoftLines) & vic.regIntEnable;
+		var ris = vic.regIntSelect;
 
-		if (ils != 0)
+		if ((iss & ris) && !(cpsr._value & PSR_F))
 		{
-			var fiq = !!(ils & ris);
-			if (fiq)
-				this.enterException (CPU.Mode.FIQ, 0x1C, this.pc._value, true);
-			else
-				this.enterException (CPU.Mode.IRQ, 0x18, this.pc._value, false);
+			this.enterException (CPU.Mode.FIQ, 0x1C, this.pc._value, true);
+			return;
+		}
+
+		if ((iss & ~ris) && !(cpsr._value & PSR_I))
+		{
+			this.enterException (CPU.Mode.IRQ, 0x18, this.pc._value, false);
+			return;
 		}
 
 		// only run after that
@@ -121,9 +121,18 @@
 		try {
 			func.call (this, inst, info);
 		} catch (e) {
-			console.log ("error executing " + Util.hex32 (this.pc._value - 4));
-			this.dumpRegisters ();
-			throw e;
+			// closure compiler workaround
+			if ((e === CPU.DataAbort) || (e instanceof CPU.DataAbort))
+			{
+				// FIXME: might be incorrect if data access occurs after PC changed
+				this.enterException (CPU.Mode.ABT, 0x10, this.pc._value, false);
+			}
+			else
+			{
+				console.log ("error executing " + Util.hex32 (this.pc._value - 4));
+				this.dumpRegisters ();
+				throw e;
+			}
 		}
 	};
 

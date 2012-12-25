@@ -19,6 +19,7 @@ board.getMilliseconds = function () {
 var fs = require ('fs');
 load (board.pmem, 0x00008000, fs.readFileSync('./resources/image'));
 load (board.pmem, 0x01000000, fs.readFileSync('./resources/board.dtb'));
+load (board.pmem, 0x01200000, fs.readFileSync('./resources/rootfs.cpio'));
 
 board.cpu.pc.set (0x00008000);
 board.cpu.getReg (0).set (0);

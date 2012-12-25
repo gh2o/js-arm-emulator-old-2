@@ -3,12 +3,29 @@
 	/**
 	 * @constructor
 	 */
+	function DataAbort (address, status, domain, msg)
+	{
+		goog.base (this, msg);
+		this.address = address;
+		this.status = status;
+		this.domain = domain;
+	}
+
+	goog.inherits (DataAbort, Util.Error);
+	CPU.DataAbort = DataAbort;
+
+	/**
+	 * @constructor
+	 */
 	function MMU (cpu, pmem)
 	{
 		this.cpu = cpu;
 		this.pmem = pmem;
+
 		this.regDomain = 0;
 		this.regTable = 0;
+		this.regFaultStatus = 0;
+		this.regFaultAddress = 0;
 	}
 
 	MMU.prototype = {
@@ -18,8 +35,8 @@
 			return this.pmem.read8 (address) & 0xFF;
 		},
 
-		write8: function (address, data) {
-			address = this.translate (address, true, false);
+		write8: function (address, data, user) {
+			address = this.translate (address, true, user);
 			this.pmem.write8 (address, data & 0xFF);
 		},
 
@@ -30,10 +47,10 @@
 			return this.pmem.read16 (address) & 0xFFFF;
 		},
 
-		write16: function (address, data) {
+		write16: function (address, data, user) {
 			if ((address & 0x01) != 0)
 				throw "unaligned 16-bit mmu write";
-			address = this.translate (address, true, false);
+			address = this.translate (address, true, user);
 			this.pmem.write16 (address, data & 0xFFFF);
 		},
 
@@ -44,14 +61,28 @@
 			return this.pmem.read32 (address);
 		},
 
-		write32: function (address, data) {
+		write32: function (address, data, user) {
 			if ((address & 0x03) != 0)
 				throw "unaligned 32-bit mmu write";
-			address = this.translate (address, true, false);
+			address = this.translate (address, true, user);
 			this.pmem.write32 (address, data >>> 0);
 		},
 
-		translate: function (inAddr, write, user) {
+		translate: function () {
+			try {
+				return this._translate.apply (this, arguments);
+			} catch (e) {
+				if (e instanceof DataAbort)
+				{
+					this.regFaultStatus =
+						((e.domain & 0xF) << 4) | (e.status & 0xF);
+					this.regFaultAddress = e.address;
+				}
+				throw e;
+			}
+		},
+
+		_translate: function (inAddr, write, user) {
 
 			inAddr >>>= 0;
 			if (!(this.cpu.creg._value & CPU.Control.M))
@@ -63,6 +94,7 @@
 			) >>> 0;
 			var firstDesc = this.pmem.read32 (firstDescAddr);
 
+			var domain = (firstDesc >>> 5) & 0x0F;
 			var ap;
 			var outAddr;
 
@@ -70,7 +102,7 @@
 			switch (firstType)
 			{
 				case 0:
-					throw new Error ("first level translation fault");
+					throw new DataAbort (inAddr, 0x5, domain, "first level translation fault");
 				case 2: // section
 					ap = (firstDesc >>> 10) & 0x03;
 					outAddr = (firstDesc & 0xFFF00000) | (inAddr & 0x000FFFFF);
@@ -95,26 +127,29 @@
 					switch (secondType)
 					{
 						case 0:
-							throw new Error ("second level translation fault");
+							throw new DataAbort (inAddr, 0x7, domain, "second level translation fault");
 						case 2: // small page
 							outAddr = (secondDesc & 0xfffff000) | (inAddr & 0x0fff);
 							var qt = (outAddr >>> 10) & 0x03;
 							ap = (secondDesc >>> (4 + 2 * qt)) & 0x03;
 							break;
 						default:
-							throw new Error ("unimplemented second level type");
+							throw "unimplemented second level type";
 					}
 					break;
 			}
 
 			// permission checks
-			var domain = (firstDesc >>> 5) & 0x0F;
 			var domainType = (this.regDomain >> (2 * domain)) & 0x03;
 			switch (domainType)
 			{
 				case 0:
 				case 2:
-					throw "domain fault";
+					throw new DataAbort (
+						inAddr,
+						(firstType == 2) ? 0x9 : 0xB,
+						domain, "domain fault"
+					);
 				case 3: // manager
 					break;
 				case 1: // client
@@ -151,7 +186,11 @@
 							break;
 					}
 					if (!allowed)
-						throw "permission fault";
+						throw new DataAbort (
+							inAddr,
+							(firstType == 2) ? 0xD : 0xF,
+							domain, "permission fault"
+						);
 					break;
 			}
 

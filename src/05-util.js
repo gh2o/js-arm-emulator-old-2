@@ -25,4 +25,21 @@
 		obj.ALL = all;
 	}
 
+	/**
+	 * @constructor
+	 */
+	function Err (msg)
+	{
+		this.error = new Error (msg);
+		this.message = msg;
+	}
+
+	Util.Error = Err;
+
+	Object.defineProperty (Err.prototype, "stack", {
+		get: function () {
+			return this.error.stack;
+		}
+	});
+
 })();

@@ -32,14 +32,20 @@
 	 * @enum {number}
 	 */
 	UART.Control = {
+		RTS: 1 << 11,
+		DTR: 1 << 10,
 		RXE: 1 << 9,
 		TXE: 1 << 8,
+		LBE: 1 << 7,
 		UARTEN: 1 << 0
 	};
 	Util.enumAll (UART.Control);
 
-	Peripherals.UART = UART;
-	goog.inherits (UART, Base);
+	// FIXME: loopback not implemented;
+
+	/**
+	 * @constructor
+	 */
 	function UART (start, callback)
 	{
 		this.start = start;
@@ -47,17 +53,34 @@
 		this.callback = callback || (function () {});
 
 		this.regControl = UART.Control.RXE | UART.Control.TXE | UART.Control.UARTEN;
+		this.regLineControl = 0x60;
+
 		this.regIntMask = 0;
 		this.regIntStatus = 0;
+		this.regIntFIFOSelect = 0;
+
+		this.regBaudInt = 1;
+		this.regBaudFrac = 0;
 	}
+
+	goog.inherits (UART, Base);
+	Peripherals.UART = UART;
 
 	UART.prototype.read32 = function (offset) {
 		switch (offset)
 		{
 			case 0x18:
 				return 0x40;
+			case 0x24: // integer baud divisor
+				return this.regBaudInt;
+			case 0x28: // fractional baud divisor
+				return this.regBaudFrac;
+			case 0x2C:
+				return this.regLineControl;
 			case 0x30:
 				return this.regControl;
+			case 0x38:
+				return this.regIntMask;
 			case 0xFE0:
 				return 0x11;
 			case 0xFE4:
@@ -83,12 +106,30 @@
 		switch (offset)
 		{
 			case 0x00:
-				this.callback (data & 0xFF);
+				var cnt = this.regControl;
+				if (
+					(cnt & UART.Control.UARTEN) &&
+					(cnt & UART.Control.TXE) &&
+					!(cnt & UART.Control.LBE)
+				)
+					this.callback (data & 0xFF);
+				break;
+			case 0x24:
+				this.regBaudInt = data;
+				break;
+			case 0x28:
+				this.regBaudFrac = data;
+				break;
+			case 0x2c:
+				this.regLineControl = data;
 				break;
 			case 0x30:
 				if (data & ~UART.Control.ALL)
 					throw "unsupported UART control: 0x" + data.toString (16);
 				this.regControl = data;
+				break;
+			case 0x34:
+				this.regIntFIFOSelect = data;
 				break;
 			case 0x38:
 				this.regIntMask = data & 0x7FF;
@@ -157,9 +198,14 @@
 		}
 	};
 
-	Peripherals.DualTimer = DualTimer;
+	/**
+	 * @constructor
+	 */
 	function DualTimer (start, vic, irq)
 	{
+		/**
+		 * @constructor
+		 */
 		function Timer () {}
 		Timer.prototype = {
 
@@ -179,6 +225,8 @@
 		this.vic = vic;
 		this.irq = irq;
 	}
+
+	Peripherals.DualTimer = DualTimer;
 
 	DualTimer.prototype.read32 = function (offset) {
 		if (offset < 0x40)
@@ -280,6 +328,7 @@
 	};
 
 	// FIXME: VIC protection
+	// FIXME: vectored interrupts
 	Peripherals.VIC = VIC;
 	function VIC (start)
 	{
@@ -289,12 +338,9 @@
 		this.intLines = 0;
 
 		this.regDefVectAddr = 0;
-		this.regVectAddr = 0;
-		this.regIntEnable = 0;
-		this.regSoftEnable = 0;
 		this.regIntSelect = 0;
-
-		this.flagProtection = false;
+		this.regIntEnable = 0;
+		this.regSoftLines = 0;
 
 		this.regsVectCntl = [];
 		for (var i = 0; i < 16; i++)
@@ -305,10 +351,16 @@
 		switch (offset)
 		{
 			case 0x00:
-				return this.intLines & this.regIntEnable & ~this.regIntSelect;
+				return (this.intLines | this.regSoftLines) &
+					this.regIntEnable & ~this.regIntSelect;
+			case 0x04:
+				return (this.intLines | this.regSoftLines) &
+					this.regIntEnable & this.regIntSelect;
+			case 0x08:
+				return this.intLines | this.regSoftLines;
 			case 0x30:
-				console.log (">>> FIXME: read from vectaddr");
-				return this.regVectAddr;
+				// FIXME: read from vectaddr
+				return this.regDefVectAddr;
 			case 0xFE0:
 				return 0x90;
 			case 0xFE4:
@@ -335,12 +387,14 @@
 			case 0x14:
 				this.regIntEnable &= ~data;
 				break;
+			case 0x18:
+				this.regSoftLines |= data;
+				break;
 			case 0x1C:
-				this.regSoftEnable &= ~data;
+				this.regSoftLines &= ~data;
 				break;
 			case 0x30:
-				console.log (">>> FIXME: write to vectaddr");
-				this.regVectAddr = data;
+				// FIXME: write to vectaddr
 				break;
 			case 0x34:
 				this.regDefVectAddr = data;

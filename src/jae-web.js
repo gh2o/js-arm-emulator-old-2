@@ -64,9 +64,10 @@ function start ()
 			output.normalize ();
 	};
 
+	var perf = (typeof performance !== "undefined") ? performance : {};
 	board.getMilliseconds = 
-		performance.now ? function () { return performance.now (); } :
-		performance.webkitNow ? function () { return performance.webkitNow (); } :
+		perf.now ? function () { return perf.now (); } :
+		perf.webkitNow ? function () { return perf.webkitNow (); } :
 		function () { return (new Date).getTime (); };
 
 	load (board.pmem, 0x00008000, resources['image']);
@@ -77,11 +78,29 @@ function start ()
 	board.cpu.getReg (1).set (0);
 	board.cpu.getReg (2).set (0x01000000);
 
+	insts = 1000;
+	var runs = 0;
+
 	var iid = setInterval (function () {
-		var start = (new Date).getTime ();
 		try {
-			while ((new Date).getTime () - start <= 20)
+			var prof = (runs % 100 == 0);
+			var start, end;
+
+			if (prof)
+				start = (new Date).getTime ();
+			for (var i = 0; i < insts; i++)
 				board.tick ();
+			if (prof)
+			{
+				end = (new Date).getTime ();
+				var elapsed = end - start;
+				if (elapsed < 15)
+					insts *= 1.05;
+				else
+					insts /= 1.05;
+			}
+
+			runs++;
 		} catch (e) {
 			clearInterval (iid);
 			throw e;
